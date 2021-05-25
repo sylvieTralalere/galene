@@ -7,6 +7,7 @@
     <meta http-equiv="ScreenOrientation" content="autoRotate:disabled">
     <link rel="stylesheet" type="text/css" href="/common.css"/>
     <link rel="stylesheet" type="text/css" href="/galene.css"/>
+    <link rel="stylesheet" type="text/css" href="/tralalere.css"/>
     <link rel="author" href="https://www.irif.fr/~jch/"/>
     <!-- Font Awesome File -->
     <link href="/css/fontawesome.min.css" rel="stylesheet" type="text/css">
@@ -20,7 +21,7 @@
       <div class="row full-height">
         <nav id="left-sidebar">
           <div class="users-header">
-            <div class="galene-header">Galène</div>
+            <div class="galene-header">Citizen Code</div>
           </div>
           <div class="header-sep"></div>
           <div id="users"></div>
@@ -38,6 +39,18 @@
               </div>
 
               <ul class="nav-menu">
+                <!-- add for Vicinity -->
+                <li>
+                  <button id="maquetteVideo" class="invisible btn btn-success">
+                    <i class="fas"></i><span class="nav-text"> video </span>
+                  </button>
+                </li>
+                <li>
+                  <button id="maquetteStoryline" class="invisible btn btn-success">
+                    <i class="fas"></i><span class="nav-text"> storyline </span>
+                  </button>
+                </li>
+                <!-- end add for Vicinity -->
                 <li>
                   <button id="presentbutton" class="invisible btn btn-success">
                     <i class="fas fa-play" aria-hidden="true"></i><span class="nav-text"> Ready</span>
@@ -273,8 +286,11 @@
       </div>
     </div>
 
+    <iframe id="myIframe" src="" ></iframe>
+
     <script src="/protocol.js" defer></script>
     <script src="/scripts/toastify.js" defer></script>
     <script src="/galene.js" defer></script>
+    <script src="/tralalere.js" defer></script>
   </body>
 </html>

@@ -1,0 +1,7 @@
+#myIframe{
+    position:absolute;
+    width:50%;
+    height:calc(80% - 50px);
+    top:50px;
+    left:50px;
+}
