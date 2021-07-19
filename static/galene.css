@@ -238,6 +238,9 @@
     flex: 30%;
     padding: 0;
     margin: 0;
+    /*background: #d3afe2;*/
+
+    background-image:url('./imgs/trame.png');
 }
 
 .coln-left-hide {
@@ -259,7 +262,7 @@
 }
 
 .full-width {
-    width: calc(100vw - 200px);
+    width: calc(100vw - 0px);/* - 200px */
     height: calc(var(--vh, 1vh) * 100 - 56px);
 }
 
@@ -274,7 +277,8 @@
 .users-header {
     height: 3.5rem;
     padding: 10px;
-    background: #610a86;
+    background: #d3afe2;
+    color:#000000;
     font-size: .95rem;
     font-weight: 500;
 }
@@ -439,9 +443,9 @@ textarea.form-reply {
     /*on top of video peers*/
     z-index: 1002;
     font-size: 1.8em;
-    position: absolute;
+    /*position: absolute;
     top: 10px;
-    left: 10px;
+    left: 10px;*/
     cursor: pointer;
 }
 
@@ -785,6 +789,7 @@ h1 {
 #chatbox {
     height: 100%;
     position: relative;
+
 }
 
 #chat {
@@ -793,13 +798,17 @@ h1 {
     background-color: #f8f8f8;
     background-size: cover;
     overflow-y: scroll;
-    border: none;
-    border-right: 4px solid #e6e6e6;
+    /*border: none;
+    border-right: 4px solid #e6e6e6;*/
     /* force to fill height */
-    height: 100% !important;
+    height: 50% !important;
     width: 100%;
     min-width: 300px;
     overflow: hidden;
+
+    border-style:solid;
+    border-width:thin;
+    border-color: #610a86;
 }
 
 #inputform {
@@ -1107,8 +1116,10 @@ legend {
     max-width: 200px;
     transition: all 0.3s;
     background: #ffffff;
-    border-right: 1px solid #dcdcdc;
+    border-left: 1px solid #aaaaaa;
     z-index: 1039;
+
+    display:none;
 }
 
 #left-sidebar .galene-header {
@@ -1126,8 +1137,8 @@ header .collapse {
 
 .galene-header {
     font-size: 1.3rem;
-    font-weight: 900;
-    color: #dbd9d9;
+    /*font-weight: 900;*/
+    color: #000000; /*#dbd9d9;*/
     line-height: 34px;
 }
 
@@ -1201,12 +1212,13 @@ header .collapse {
 
 /* END Sidebar Left */
 
+/*
 @media only screen and (min-width: 1025px) {
     .coln-right .collapse-video, .coln-right .show-video {
         display: none;
     }
 }
-
+*/
 @media only screen and (max-width: 1024px) {
     #presentbutton, #unpresentbutton {
         width: auto;
@@ -1230,11 +1242,11 @@ header .collapse {
     }
 
     .full-width {
-        height: calc(var(--vh, 1vh) * 100 - 56px);
+        /*height: calc(var(--vh, 1vh) * 100 - 56px);*/
     }
 
     .close-chat, .show-chat {
-        display: none;
+        /*display: none;*/
     }
 
     .video-container {
@@ -1264,15 +1276,16 @@ header .collapse {
     }
 
     .coln-left {
-        flex: 100%;
+        /*flex: 100%;
         width: 100vw;
-        /* chat is always visible here */
-        display: block !important;
+
+
+        display: block; !important; !!!!!!!!!!!*/
     }
 
     .coln-right {
-        flex: none;
-        position: relative;
+        /*flex: none;
+        position: relative;*/
     }
 
     .full-width {
@@ -1289,7 +1302,7 @@ header .collapse {
         max-width: 0;
     }
 
-    /* Reappearing the sidebar on toggle button click */
+
     #left-sidebar {
         margin-left: 0; 
     }

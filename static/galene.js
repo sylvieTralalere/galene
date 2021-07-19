@@ -39,13 +39,13 @@ let serverConnection;
  */
 let fallbackUserPass = null;
 
-
 /**
  * @param {string} username
  * @param {string} password
+ * @param {string} usercolor
  */
-function storeUserPass(username, password) {
-    let userpass = {username: username, password: password};
+function storeUserData(username, password, usercolor) {
+    let userpass = {username: username, password: password, usercolor:usercolor};
     try {
         window.sessionStorage.setItem('userpass', JSON.stringify(userpass));
         fallbackUserPass = null;
@@ -60,7 +60,7 @@ function storeUserPass(username, password) {
  *
  * @returns {userpass}
  */
-function getUserPass() {
+function getUserData() {
     /** @type{userpass} */
     let userpass;
     try {
@@ -284,12 +284,19 @@ function showVideo() {
         setVisibility('show-video', false);
         setVisibility('collapse-video', hasmedia);
     }
-    setVisibility('video-container', hasmedia);
+
+    let currentVicinity = getSettings().vicinity;
+    if(currentVicinity==="off") {
+        setVisibility('video-container', hasmedia);
+    }else{
+
+    }
+
     scheduleReconsiderDownRate();
 }
 
 function fillLogin() {
-    let userpass = getUserPass();
+    let userpass = getUserData();
     getInputElement('username').value =
         userpass ? userpass.username : '';
     getInputElement('password').value =
@@ -303,7 +310,8 @@ function setConnected(connected) {
     let userbox = document.getElementById('profile');
     let connectionbox = document.getElementById('login-container');
     if(connected) {
-        clearChat();
+        resetUsers();
+        clearChat(); //!!!!!!!!!!!!!!!!!!!!!!!! resetUsers()
         userbox.classList.remove('invisible');
         connectionbox.classList.add('invisible');
         displayUsername();
@@ -311,19 +319,21 @@ function setConnected(connected) {
             scheduleReconsiderDownRate();
         }
     } else {
-        fillLogin();
+        resetUsers();
+        fillLogin(); //!!!!!!!!!!!!!!!!!!!!!!!! resetUsers()
         userbox.classList.add('invisible');
         connectionbox.classList.remove('invisible');
-        displayError('Disconnected', 'error');
+        console.log("disconnected")
+        // displayError('Disconnected', 'error'); disabled for Tralalere
         hideVideo();
-        window.onresize = null;
+        window.onresize = null;//!!!!!!!!!!!!!
     }
 }
 
 /** @this {ServerConnection} */
 function gotConnected() {
     setConnected(true);
-    let up = getUserPass();
+    let up = getUserData();
     this.join(group, up.username, up.password);
 }
 
@@ -356,7 +366,7 @@ function gotDownStream(c) {
         setMedia(c, false);
     };
     c.onnegotiationcompleted = function() {
-        resetMedia(c);
+        resetMedia(c); //!!!!!!!!!!!!!!!!!
     }
     c.onstatus = function(status) {
         setMediaStatus(c);
@@ -373,7 +383,7 @@ function setViewportHeight() {
     document.documentElement.style.setProperty(
         '--vh', `${window.innerHeight/100}px`,
     );
-    showVideo();
+    showVideo();//!!!!!!!!!!!!!!!!!!!!!
     // Ajust video component size
     resizePeers();
 }
@@ -405,6 +415,8 @@ getButtonElement('unpresentbutton').onclick = function(e) {
     resizePeers();
 };
 
+//!!!!!!!!!!! changePresentation ?
+
 /**
  * @param {string} id
  * @param {boolean} visible
@@ -431,24 +443,41 @@ function setButtonsVisibility() {
     let mobilelayout = isMobileLayout();
 
     // don't allow multiple presentations
-    setVisibility('presentbutton', canWebrtc && permissions.present && !local);
-    setVisibility('unpresentbutton', local);
+    setVisibility('presentbutton', canWebrtc && permissions.op && !local); // remettre permissions.present si pas Tralalere
 
-    setVisibility('mutebutton', !connected || permissions.present);
+    //setVisibility('unpresentbutton', local);// bouton Panic: à voir si c'est OK la ligne ci-dessous
+    setVisibility('unpresentbutton', permissions.op);
+
+    setVisibility('mutebutton', !connected || permissions.present );// remettre permissions.present si pas Tralalere
 
     // allow multiple shared documents
-    setVisibility('sharebutton', canWebrtc && permissions.present &&
-                  ('getDisplayMedia' in navigator.mediaDevices));
+    setVisibility('sharebutton', canWebrtc && permissions.op &&
+                  ('getDisplayMedia' in navigator.mediaDevices));// remettre permissions.present si pas Tralalere
 
-    setVisibility('mediaoptions', permissions.present);
-    setVisibility('sendform', permissions.present);
-    setVisibility('simulcastform', permissions.present);
-    setVisibility('fileform', canFile && permissions.present);
-
-    setVisibility('maquetteVideo', permissions.op);
-    setVisibility('maquetteStoryline', permissions.op);
+    setVisibility('mediaoptions', permissions.op);// remettre permissions.present si pas Tralalere
+    setVisibility('sendform', permissions.op);// remettre permissions.present si pas Tralalere
+    setVisibility('simulcastform', permissions.op);// remettre permissions.present si pas Tralalere
+    setVisibility('fileform', canFile && permissions.op);// remettre permissions.present si pas Tralalere
 
     setVisibility('collapse-video', mediacount && mobilelayout);
+
+    //setVisibility('standardbutton', permissions.op);
+    //setVisibility('vicinitybutton', permissions.op);
+    //setVisibility('maquetteVideo', permissions.op);
+    //setVisibility('maquetteStoryline', permissions.op);
+    let currentVicinity = getSettings().vicinity;
+    if(currentVicinity==="off") {
+        //setVisibility('bullhornbutton', false);
+    }else{
+        //setVisibility('bullhornbutton', true);
+    }
+
+    setVisibility('bullhornbutton', permissions.op);
+    //setVisibility('ask-for-help', permissions.op);// les aprticipants l'auront plus tard
+    setVisibility('show-chat', true);
+    setVisibility('participant-btn', permissions.op);
+    setVisibility('mute-all-btn', permissions.op);
+
 }
 
 /**
@@ -507,9 +536,15 @@ getInputElement('blackboardbox').onchange = function(e) {
 
 document.getElementById('mutebutton').onclick = function(e) {
     e.preventDefault();
-    let localMute = getSettings().localMute;
-    localMute = !localMute;
-    setLocalMute(localMute, true);
+
+    if(muteMode===true) {
+        displayError("L'animateur n'autorise pas à ré-activer votre micro");
+    }else{
+        let localMute = getSettings().localMute;
+        localMute = !localMute;
+        setLocalMute(localMute, true);
+    }
+
 };
 
 document.getElementById('sharebutton').onclick = function(e) {
@@ -1627,7 +1662,9 @@ function scheduleReconsiderDownRate() {
  *       controls will be created.
  */
 async function setMedia(c, isUp, mirror, video) {
+    //console.log(c);
     let peersdiv = document.getElementById('peers');
+    let nbmedia=0;//!!!!!!!!!
 
     let div = document.getElementById('peer-' + c.localId);
     if(!div) {
@@ -1653,8 +1690,53 @@ async function setMedia(c, isUp, mirror, video) {
         /** @ts-ignore */
         media.playsinline = true;
         media.id = 'media-' + c.localId;
+
+        // ajout Vicinity
+        /*let types=[];
+        for (var key in c.labels) {
+            types.push(c.labels[key])
+        }*/
+        let types=c.label;
+
+        let mediaVisible=false;
+        let owner = "noop";
+
+
+        if(c.source===null) {
+            nbmedia=users[serverConnection.id].media.length;
+
+            if(users[serverConnection.id].p==="op") {
+                mediaVisible=true;
+                owner="op";
+            }else{
+                owner="me";
+            }
+
+            users[serverConnection.id].media.push({"id":'media-' + c.localId,"cid":c.id,"x":v_params.ori_x,"y":v_params.ori_y+(nbmedia+1)*v_params.offset_y,"expanded":0, "types":types, "owner":owner});
+        }else{
+            let mycSource = c.source;
+            nbmedia=users[mycSource].media.length;
+            // il faut passer par serverconnections.users
+            // car la variables interne users n'est pas encore bien instanciée
+
+            if(serverConnection.users[mycSource].permissions.op) {
+                 mediaVisible=true;
+                owner="op";
+            }else{
+                // neither "op" nor "me"
+            }
+
+            users[c.source].media.push({"id":'media-' + c.localId,"cid":c.id,"x":v_params.ori_x,"y":v_params.ori_y+(nbmedia+1)*v_params.offset_y,"expanded":0, "types":types, "owner":owner});
+        }
         div.appendChild(media);
         addCustomControls(media, div, c, !!video);
+
+        div.dataset.owner=owner;// servira pour afficher les media
+
+        if(mediaVisible===true) {
+        }else{
+            div.style.display="none";
+        }
     }
 
     if(mirror)
@@ -1692,6 +1774,13 @@ async function setMedia(c, isUp, mirror, video) {
             stream.getTracks().forEach(t => t.stop());
         } catch(e) {
         }
+    }
+    //-- vicinity :
+    let currentSettings = getSettings();
+    let currentVicinity = currentSettings.vicinity;
+    if(currentVicinity==="on") {
+        mediaVicinity();
+    }else{
     }
 }
 
@@ -1878,16 +1967,44 @@ function registerControlHandlers(localId, media, container) {
  * @param {string} localId
  */
 function delMedia(localId) {
+
     let mediadiv = document.getElementById('peers');
     let peer = document.getElementById('peer-' + localId);
     if(!peer)
         throw new Error('Removing unknown media');
 
+    //-- vicinity :
+    let currentSettings = getSettings();
+    let currentVicinity = currentSettings.vicinity;
+
+
     let media = /** @type{HTMLVideoElement} */
         (document.getElementById('media-' + localId));
 
     media.srcObject = null;
-    mediadiv.removeChild(peer);
+   // mediadiv.removeChild(peer);
+    if(currentVicinity==="on") {
+        var mediaParent = document.getElementById('list-media-v');
+        mediaParent.removeChild(peer);
+    }else{
+        mediadiv.removeChild(peer);
+    }
+
+
+    //-- users
+    for(var key in users) {
+        let founded = -1;
+        for(var i=0;i<users[key].media.length; i++){
+            if(users[key].media[i].id==='media-' + localId) {
+                founded = i;
+            }else{
+            }
+        }
+        if (founded>-1) {
+            users[key].media.splice(founded, 1);
+        }else{
+        }
+    }
 
     setButtonsVisibility();
     resizePeers();
@@ -1952,6 +2069,7 @@ function resizePeers() {
         Object.keys(serverConnection.down).length;
     let peers = document.getElementById('peers');
     let columns = Math.ceil(Math.sqrt(count));
+    /*
     if (!count)
         // No video, nothing to resize.
         return;
@@ -1962,13 +2080,15 @@ function resizePeers() {
     let margins = (rows - 1) * 5 + 40;
 
     if (count <= 2 && container.offsetHeight > container.offsetWidth) {
-        peers.style['grid-template-columns'] = "repeat(1, 1fr)";
-        rows = count;
+        //peers.style['grid-template-columns'] = "repeat(1, 1fr)";//!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // rows = count;
     } else {
-        peers.style['grid-template-columns'] = `repeat(${columns}, 1fr)`;
+        //peers.style['grid-template-columns'] = `repeat(${columns}, 1fr)`;//!!!!!!!!!!!!!!!!!!!!!!!!!!!
     }
     if (count === 1)
         return;
+        */
+    /* //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     let max_video_height = (peers.offsetHeight - margins) / rows;
     let media_list = peers.querySelectorAll(".media");
     for(let i = 0; i < media_list.length; i++) {
@@ -1978,8 +2098,35 @@ function resizePeers() {
             continue;
         }
         media.style['max-height'] = max_video_height + "px";
+    }*/
+    // ajout
+
+    let currentVicinity = getSettings().vicinity;
+
+    if(currentVicinity==="on") {
+    }else{
+        let nbPeers = peers.children.length;
+        let opmediaFound=false;
+        for(var i=nbPeers-1;i>=0;i--){
+
+            if(peers.children[i].dataset.owner==="op") {
+                if (opmediaFound===false) {
+                    opmediaFound=true;
+                    peers.children[i].style.display="block";// le ernier est affiché
+                }else{
+                    peers.children[i].style.display="none";// le ernier est affiché
+                }
+            }else{
+                peers.children[i].style.display="none";// no op
+            }
+        }
     }
+
+
 }
+
+/** @type{Object<string,Object>} */
+let users = {};
 
 /**
  * Lexicographic order, with case differences secondary.
@@ -2005,14 +2152,26 @@ function stringCompare(a, b) {
  * @param {string} name
  */
 function addUser(id, name) {
+
     if(!name)
         name = null;
+    // @TODO give the explaination of all the params
+    users[id] = {"name":name,"color":"#20b91e","x":v_params.ori_x,"y":v_params.ori_y, "media":[],"bullhorn":false,"localx":0,"localy":0,"expanded":0,"tnotification":0,"p":"noop"};
 
     let div = document.getElementById('users');
     let user = document.createElement('div');
     user.id = 'user-' + id;
     user.classList.add("user-p");
     user.textContent = name ? name : '(anon)';
+
+
+    // put it before since problem with return - warning : structured programming not respected with return
+    addUserVicinity(id, name);
+
+    let divNbUsers = document.getElementById('nb-users');
+    divNbUsers.innerHTML="Participants ("+Object.keys(serverConnection.users).length+")";
+
+
 
     if(name) {
         let us = div.children;
@@ -2047,9 +2206,23 @@ function changeUser(id, name) {
  * @param {string} id
  */
 function delUser(id) {
+    if(!(id in users))
+        throw new Error('Unknown user id');
+    //!!!!!!!!!!!!
+    delete(users[id]);//!!!!!!!!!!!!!!!!!!
     let div = document.getElementById('users');
     let user = document.getElementById('user-' + id);
     div.removeChild(user);
+
+    delUserVicinity(id);
+
+    let divNbUsers = document.getElementById('nb-users');
+    divNbUsers.innerHTML="Participants ("+Object.keys(serverConnection.users).length+")";
+}
+
+function resetUsers() {
+    for(let id in users)
+        delUser(id);
 }
 
 /**
@@ -2078,7 +2251,7 @@ function gotUser(id, kind) {
 }
 
 function displayUsername() {
-    let userpass = getUserPass();
+    let userpass = getUserData();
     let text = '';
     if(userpass && userpass.username)
         document.getElementById('userspan').textContent = userpass.username;
@@ -2104,7 +2277,23 @@ async function gotJoined(kind, group, perms, message) {
 
     switch(kind) {
     case 'fail':
-        displayError('The server said: ' + message);
+        //-- for Tralalere
+
+        switch(message){
+            case "not authorised":
+                profileAnalysis();
+                break;
+            case "anonymous users not allowed in this group, please choose a username":
+                message="Il faut entrer votre nom";
+                displayError('Attention : ' + message);
+                break;
+            default:
+                displayError('Attention : ' + message);
+                break;
+        }
+
+
+
         this.close();
         setButtonsVisibility();
         return;
@@ -2118,8 +2307,21 @@ async function gotJoined(kind, group, perms, message) {
         return;
     case 'join':
     case 'change':
+        let u = getUserData();
+        let pop="noop";
+        if(serverConnection.permissions.op) {
+            pop="op";
+        }else{
+        }
+        let data = {c:u.usercolor, x:users[serverConnection.id].x, y:users[serverConnection.id].y, bullhorn:users[serverConnection.id].bullhorn, p:pop};
+        // notify color
+        serverConnection.userMessage("setAllData", null, data, false)
+        // ask other colors
+        serverConnection.userMessage("getAllData", null, "", true)
+
         displayUsername();
         setButtonsVisibility();
+        loadSteps();
         if(kind === 'change')
             return;
         break;
@@ -2155,9 +2357,11 @@ async function gotJoined(kind, group, perms, message) {
                 button.disabled = false;
             }
         } else {
+            /*
             displayMessage(
                 "Press Ready to enable your camera or microphone"
-            );
+            ); // disabled for Tralalere
+            */
         }
     }
 }
@@ -2172,6 +2376,9 @@ async function gotJoined(kind, group, perms, message) {
  * @param {unknown} message
  */
 function gotUserMessage(id, dest, username, time, privileged, kind, message) {
+
+    let userv = document.getElementById('user-v-' + id);
+
     switch(kind) {
     case 'error':
     case 'warning':
@@ -2198,6 +2405,300 @@ function gotUserMessage(id, dest, username, time, privileged, kind, message) {
             console.error(`Got unprivileged message of kind ${kind}`);
         }
         break;
+
+    case 'setAllData':
+            users[id].color=message.c;
+            let user = document.getElementById('user-' + id);
+            user.classList.add("color"+message.c);
+            let circlev = document.getElementById('circle-v-' + id);
+            circlev.style.backgroundColor='var(--color'+message.c+')';
+            //let userv = document.getElementById('user-v-' + id);
+
+            let xdef=parseInt(message.x);
+            let ydef=parseInt(message.y);
+
+            if(id===serverConnection.id) {
+                users[serverConnection.id].currentx=message.x;
+                users[serverConnection.id].currenty=message.y;
+                users[serverConnection.id].initialx=message.x;
+                users[serverConnection.id].initialy=message.y;
+                /*userv.dataset.currentx=message.x;
+                userv.dataset.currenty=message.y;
+                userv.dataset.initialx=message.x;
+                userv.dataset.initialy=message.y;*/
+            }else{
+                if (message.x<v_params.hall_x) {
+                    xdef=v_params.out_x;
+                }else{
+                }
+            }
+            userv.style.left=xdef+"px";
+            userv.style.top=ydef+"px";
+            users[id].x=xdef;
+            users[id].y=ydef;
+
+            users[id].bullhorn=message.bullhorn;
+            users[id].p=message.p;
+
+            break;
+
+        case 'getAllData':
+            let u = getUserData();
+            let data = {c:u.usercolor, x:users[serverConnection.id].x, y:users[serverConnection.id].y,bullhorn:users[serverConnection.id].bullhorn,p:users[serverConnection.id].p};
+            serverConnection.userMessage("setAllData", id, data , true)
+            break;
+
+
+        case 'setPos':
+
+            //let userp = document.getElementById('user-v-' + id);
+            let xdefp=parseInt(message.x);
+            let  ydefp=parseInt(message.y);
+
+            if(id===serverConnection.id) {
+                // impossible
+            }else{
+                if (message.x<v_params.hall_x) {
+                    xdefp=v_params.out_x;
+                }else{
+                }
+
+            }
+            userv.style.left=xdefp+"px";
+            userv.style.top=ydefp+"px";
+            users[id].x=xdefp;
+            users[id].y=ydefp;
+
+            // volume
+            computeVolume();
+
+            break;
+        case 'setPosHelp':
+
+            let nbDataHelp = message.length;
+
+            for(var i=0;i<nbDataHelp;i++){
+                let userph = document.getElementById('user-v-' + message[i].id);
+                let xdefph=parseInt(message[i].x);
+                let ydefph=parseInt(message[i].y);
+
+                userph.style.left=xdefph+"px";
+                userph.style.top=ydefph+"px";
+                users[message[i].id].x=xdefph;
+                users[message[i].id].y=ydefph;
+                users[message[i].id].currentx=xdefph;
+                users[message[i].id].currenty=ydefph;
+
+                // cas outforhelp
+                if(message[i].id===serverConnection.id) {
+                    if(xdefph===-3000) {
+                        updateSetting("helpMe", false);
+                        //-- button
+                        let divmuteHelpBtn = document.getElementById('ask-for-help');
+                        divmuteHelpBtn.classList.remove("muted");
+                    }else{
+                    }
+                }else{
+                }
+
+                //-- expanded
+                if (users[message[i].id].expanded==1) {
+                    // @TODO : put u=in a function :
+                    users[message[i].id].expanded=0;
+                    let btn = document.getElementById('btn-zone-v-' + message[i].id);
+                    let btnmsg = document.getElementById('btn-msg-v-' + message[i].id);
+                    userph.classList.remove("userv-expanded");
+                    btn.style.display="none";
+                    btnmsg.style.display="none";
+
+                    for(var i=0;i<users[message[i].id].media.length;i++){
+                        if(users[message[i].id].media[i].expanded===0) {
+                            let peerid = "peer-"+users[message[i].id].media[i].id.substr(6,2);
+                            let div = document.getElementById(peerid);
+                            div.style.display="none";
+                        }else{
+                            // expanded
+                        }
+                    }
+                }else{
+                    // already 0
+                }
+
+            }
+
+
+            // volume
+            computeVolume();
+
+
+            break;
+
+        case 'tooManyHelp':
+            displayError("Pour l'instant il y a trop de personnes dans le help center");
+            updateSetting("helpMe", false);
+            let divmuteHelpBtn = document.getElementById('ask-for-help');
+            divmuteHelpBtn.classList.remove("muted");
+            break;
+        //@TODO all gainMathod are to be deleted after tests
+        case 'gainMethod1':
+            v_params.type_gain="linear";
+            computeVolume();
+            break
+        case 'gainMethod2':
+            v_params.type_gain="1/d^2";
+            v_params.gain_a = 20;
+            computeVolume();
+            break
+        case 'gainMethod3':
+            v_params.type_gain="1/d^2";
+            v_params.gain_a = 30;
+            computeVolume();
+            break
+        case 'gainMethod4':
+            v_params.type_gain="1/d^2";
+            v_params.gain_a = 50;
+            computeVolume();
+            break
+        case 'gainMethod5':
+            v_params.type_gain="1/d^2";
+            v_params.gain_a = 100;
+            computeVolume();
+            break
+        case 'gainMethod6':
+            v_params.type_gain="quadratic";
+            v_params.gain_a = 0;
+            computeVolume();
+            break
+        case 'gainMethod7':
+            v_params.type_gain="quadratic";
+            v_params.gain_a = 4;
+            computeVolume();
+            break
+        case 'gainMethod8':
+            v_params.type_gain="quadratic";
+            v_params.gain_a = 5;
+            computeVolume();
+            break
+        case 'setVicinity':
+            setVicinity(message);
+            break;
+
+        case 'setBullhorn':
+            users[id].bullhorn=message;
+            //let div = document.getElementById('user-v-'+id);
+            //let circle = div.children[0];
+            let circle = userv.children[0];
+            let icon = circle.children[0];
+            if(message===true) {
+                icon.classList.add("fa-bullhorn");
+            }else{
+                icon.classList.remove("fa-bullhorn");
+            }
+            // volume
+            computeVolume();
+            computeEye();
+
+            break;
+
+        case 'setVideo':
+            /*if(message===true) {
+                document.getElementById('myIframe').src = '../resources/videos/index.html';
+                document.getElementById('myIframe').style.zIndex=2000;
+            }else{
+                document.getElementById('myIframe').src = '../resources/empty.html';
+                document.getElementById('myIframe').style.zIndex='unset';
+            }*/
+            break;
+
+        case 'setStory':
+            if(message===true) {
+                document.getElementById('myIframe').src = 'https://boubs.fr/code-decode/';//https://boubs.fr/storyline/';
+                document.getElementById('myIframe').style.zIndex=2000;
+                document.getElementById('myIframe').style.display="block";
+            }else{
+                document.getElementById('myIframe').src = '../resources/empty.html';
+                document.getElementById('myIframe').style.zIndex='unset';
+                document.getElementById('myIframe').style.display="none";
+            }
+            break;
+
+        case 'setVideoMode':
+            let myIframe=document.getElementById('myIframe');
+            if(message==='play') {
+                // envoi du parent vers iframe :-----------
+                 myIframe.contentWindow.postMessage("pVideoPlay", '*');
+            }else{
+                myIframe.contentWindow.postMessage("pVideoPause", '*');
+            }
+            break;
+        case 'goStep1':
+            myTralaStep=1;
+
+            console.log("usermessage goStep1");
+            document.getElementById('myIframe').src = '../resources/empty.html';
+            document.getElementById('myIframe').style.zIndex='unset';
+            document.getElementById('myIframe').style.display="none";
+            //document.getElementById('video-container').style.display="block";
+            document.getElementById('ask-for-help').style.display="none";
+
+            if(serverConnection.permissions.op) {
+            }else{
+                document.getElementById('sharebutton').style.display="none";
+            }
+            refreshSteps(1);
+
+            setVicinity("off");
+            serverConnection.userMessage("setVicinity", null, "off", false);
+
+            break;
+        case 'goStep2':
+            if((myTralaStep===2)||(myTralaStep===3)) {
+                // nothing
+            }else{
+                myTralaStep=2;
+                document.getElementById('myIframe').src = 'https://boubs.fr/storyline/';//https://boubs.fr/storyline/';
+                document.getElementById('myIframe').style.zIndex=2000;
+                document.getElementById('myIframe').style.display="block";
+                //document.getElementById('video-container').style.display="none";
+                document.getElementById('ask-for-help').style.display="block";
+
+                if(serverConnection.permissions.op) {
+                }else{
+                    document.getElementById('sharebutton').style.display="block";
+                }
+                refreshSteps(2);
+
+                setVicinity("on");
+                serverConnection.userMessage("setVicinity", null, "on", false);
+
+            }
+
+
+            break;
+        case 'goStep3':
+
+            break;
+        case 'goStep4':
+            myTralaStep=4;
+            console.log("usermessage goStep4");
+            document.getElementById('myIframe').src = '../resources/empty.html';
+            document.getElementById('myIframe').style.zIndex='unset';
+            document.getElementById('myIframe').style.display="none";
+            //document.getElementById('video-container').style.display="block";
+            document.getElementById('ask-for-help').style.display="none";
+            if(serverConnection.permissions.op) {
+            }else{
+                document.getElementById('sharebutton').style.display="none";
+            }
+            refreshSteps(4);
+
+            setVicinity("off");
+            serverConnection.userMessage("setVicinity", null, "off", false);
+
+            break;
+        case 'tralacontrol':
+            gereControl(id,message);
+            break;
     default:
         console.warn(`Got unknown user message ${kind}`);
         break;
@@ -2281,7 +2782,7 @@ let lastMessage = {};
  * @param {unknown} message
  */
 function addToChatbox(peerId, dest, nick, time, privileged, kind, message) {
-    let userpass = getUserPass();
+    let userpass = getUserData();
     let row = document.createElement('div');
     row.classList.add('message-row');
     let container = document.createElement('div');
@@ -2339,6 +2840,12 @@ function addToChatbox(peerId, dest, nick, time, privileged, kind, message) {
         lastMessage.peerId = peerId;
         lastMessage.dest = (dest || null);
         lastMessage.time = (time || null);
+
+        if(typeof peerId === 'undefined'){
+            // for instance when launching the page
+        }else{
+            showNotification(peerId)
+        }
     } else {
         let asterisk = document.createElement('span');
         asterisk.textContent = '*';
@@ -2866,7 +3373,7 @@ document.getElementById('input').onkeypress = function(e) {
 
 function chatResizer(e) {
     e.preventDefault();
-    let full_width = document.getElementById("mainrow").offsetWidth;
+    /*let full_width = document.getElementById("mainrow").offsetWidth;
     let left = document.getElementById("left");
     let right = document.getElementById("right");
 
@@ -2880,6 +3387,30 @@ function chatResizer(e) {
         if (left_width < min_left_width) {
           return;
         }
+
+        //invert :
+        left.style.flex = left_width.toString();
+        right.style.flex = (100 - left_width).toString();
+
+
+    }*/
+
+    let full_width = document.getElementById("mainrow").offsetWidth;
+    let left = document.getElementById("right");
+    let right = document.getElementById("left");
+
+    let start_x = e.clientX;
+    let start_width = left.offsetWidth;
+
+    function start_drag(e) {
+        let left_width = (start_width + e.clientX - start_x) * 100 / full_width;
+        // set min chat width to 300px
+        let min_left_width = 300 * 100 / full_width;
+        if (left_width < min_left_width) {
+            return;
+        }
+
+        //invert :
         left.style.flex = left_width.toString();
         right.style.flex = (100 - left_width).toString();
     }
@@ -2961,7 +3492,8 @@ document.getElementById('userform').onsubmit = async function(e) {
     try {
         let username = getInputElement('username').value.trim();
         let password = getInputElement('password').value;
-        storeUserPass(username, password);
+        let usercolor = getInputElement('usercolor').value;
+        storeUserData(username, password, usercolor);
         serverConnect();
     } finally {
         connecting = false;
@@ -2974,7 +3506,7 @@ document.getElementById('userform').onsubmit = async function(e) {
     else
         presentRequested = null;
 
-    getInputElement('presentoff').checked = true;
+    //getInputElement('presentoff').checked = true; disabled for Tralalere
 };
 
 document.getElementById('disconnectbutton').onclick = function(e) {
@@ -3029,14 +3561,27 @@ document.getElementById('show-video').onclick = function(e) {
 document.getElementById('close-chat').onclick = function(e) {
     e.preventDefault();
     setVisibility('left', false);
-    setVisibility('show-chat', true);
+    //setVisibility('show-chat', true);
+    updateSetting("showChat", false);
+    document.getElementById('show-chat').classList.remove("muted")
     resizePeers();
 };
 
 document.getElementById('show-chat').onclick = function(e) {
     e.preventDefault();
-    setVisibility('left', true);
-    setVisibility('show-chat', false);
+
+    let showChat = getSettings().showChat;
+    showChat = !showChat;
+    updateSetting("showChat", showChat);
+
+    if(showChat===true) {
+        setVisibility('left', true);
+        document.getElementById('show-chat').classList.add("muted")
+    }else{
+        setVisibility('left', false);
+        document.getElementById('show-chat').classList.remove("muted")
+    }
+
     resizePeers();
 };
 

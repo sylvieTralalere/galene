@@ -7,6 +7,7 @@
     <meta http-equiv="ScreenOrientation" content="autoRotate:disabled">
     <link rel="stylesheet" type="text/css" href="/common.css"/>
     <link rel="stylesheet" type="text/css" href="/galene.css"/>
+    <link rel="stylesheet" type="text/css" href="/vicinity.css"/>
     <link rel="stylesheet" type="text/css" href="/tralalere.css"/>
     <link rel="author" href="https://www.irif.fr/~jch/"/>
     <!-- Font Awesome File -->
@@ -19,36 +20,75 @@
   <body>
     <div id="main" class="app">
       <div class="row full-height">
-        <nav id="left-sidebar">
-          <div class="users-header">
-            <div class="galene-header">Citizen Code</div>
-          </div>
-          <div class="header-sep"></div>
-          <div id="users"></div>
-        </nav>
+
         <div class="container">
           <header>
             <nav class="topnav navbar navbar-expand navbar-light fixed-top">
               <div id="header">
+
+
                 <div class="collapse" title="Collapse left panel" id="sidebarCollapse">
-                  <svg class="svg-inline--fa" aria-hidden="true" data-icon="align-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">
+                  <div class="logoCTZC"></div>
+                  <!--
+                  <svg class="svg-inline--fa invisible" aria-hidden="true" data-icon="align-left" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512">
                     <path fill="currentColor" d="M288 44v40c0 8.837-7.163 16-16 16H16c-8.837 0-16-7.163-16-16V44c0-8.837 7.163-16 16-16h256c8.837 0 16 7.163 16 16zM0 172v40c0 8.837 7.163 16 16 16h416c8.837 0 16-7.163 16-16v-40c0-8.837-7.163-16-16-16H16c-8.837 0-16 7.163-16 16zm16 312h416c8.837 0 16-7.163 16-16v-40c0-8.837-7.163-16-16-16H16c-8.837 0-16 7.163-16 16v40c0 8.837 7.163 16 16 16zm256-200H16c-8.837 0-16 7.163-16 16v40c0 8.837 7.163 16 16 16h256c8.837 0 16-7.163 16-16v-40c0-8.837-7.163-16-16-16z"></path>
                   </svg>
+                  -->
                 </div>
-                <h1 id="title" class="header-title">Galène</h1>
+
+                <h1 id="title" class="header-title invisible">Galène</h1>
               </div>
 
               <ul class="nav-menu">
                 <!-- add for Vicinity -->
                 <li>
+                  <iframe id="mySteps" src="" ></iframe>
+                </li>
+                <!-- clean after maquette -->
+                <li>
+                  <button id="standardbutton" class="invisible btn btn-success">
+                    <i class="fas"></i><span class="nav-text"> Standard Mode</span>
+                  </button>
+                </li>
+                <li>
+                  <button id="vicinitybutton" class="invisible btn btn-success">
+                    <i class="fas"></i><span class="nav-text"> Vicinity Mode</span>
+                  </button>
+                </li>
+                <li>
                   <button id="maquetteVideo" class="invisible btn btn-success">
-                    <i class="fas"></i><span class="nav-text"> video </span>
+                    <i class="fas"></i><span class="nav-text"> show video </span>
                   </button>
                 </li>
                 <li>
                   <button id="maquetteStoryline" class="invisible btn btn-success">
-                    <i class="fas"></i><span class="nav-text"> storyline </span>
+                    <i class="fas"></i><span class="nav-text"> Show storyline </span>
                   </button>
+                </li>
+                <!-- end clean after maquette -->
+                <li>
+                  <div id="mute-all-btn" class="invisible nav-link nav-button">
+                    <span><i class="fa fa-microphone-alt"></i></span>
+                    <label>Mute all</label>
+                  </div>
+                </li>
+                <li>
+                  <div id="participant-btn" class="invisible nav-link nav-button">
+                    <span><i class="fa fa-people-arrows"></i></span>
+                    <label>Participants</label>
+                  </div>
+                </li>
+                <li>
+                  <div id="ask-for-help" class="invisible nav-link nav-button">
+                    <span><i class="fa fa-hands-helping"></i></span>
+                    <label>Help !</label>
+                  </div>
+                </li>
+                <li>
+                  <div id="show-chat" class="invisible nav-link nav-button">
+                    <span><i class="far fa-comment-alt"></i></span>
+                    <label>messages</label>
+                  </div>
                 </li>
                 <!-- end add for Vicinity -->
                 <li>
@@ -56,13 +96,16 @@
                     <i class="fas fa-play" aria-hidden="true"></i><span class="nav-text"> Ready</span>
                   </button>
                 </li>
+
                 <li>
-                  <button id="unpresentbutton" class="invisible btn btn-cancel">
-                    <i class="fas fa-stop" aria-hidden="true"></i><span class="nav-text"> Panic</span>
-                  </button>
+                  <div id="bullhornbutton" class="invisible nav-link nav-button">
+                    <span><i class="fas fa-bullhorn" aria-hidden="true"></i></span>
+                    <div class="bullhornslash"></div>
+                    <label>Megaphone</label>
+                  </div>
                 </li>
                 <li>
-                  <div id="mutebutton" class="nav-link nav-button">
+                  <div id="mutebutton" class="invisible nav-link nav-button">
                     <span><i class="fas fa-microphone-slash" aria-hidden="true"></i></span>
                     <label>Mute</label>
                   </div>
@@ -74,15 +117,85 @@
                   </div>
                 </li>
                 <li>
+                  <button id="unpresentbutton" class="invisible btn btn-cancel">
+                    <i class="fas fa-stop" aria-hidden="true"></i><span class="nav-text"> Panic</span>
+                  </button>
+                </li>
+                <li>
                   <div class="nav-button nav-link nav-more" id="openside">
                     <span><i class="fas fa-ellipsis-v" aria-hidden="true"></i></span>
                   </div>
                 </li>
               </ul>
+
+
+
             </nav>
           </header>
           <div class="row full-width" id="mainrow">
-            <div class="coln-left" id="left">
+            <div class="coln-right" id="right">
+              <span class="show-video blink invisible" id="show-video">
+                <i class="fas fa-exchange-alt" aria-hidden="true"></i>
+              </span>
+
+              <div class="chat-btn collapse-video invisible-trala" id="collapse-video">
+                <i class="far fa-comment-alt icon-chat" title="Hide video and show chat"></i>
+              </div>
+             <!-- -->
+              <div class="video-container invisible" id="video-container">
+                <div id="expand-video" class="expand-video">
+                  <div id="peers"></div>
+                </div>
+              </div>
+
+              <iframe id="myIframe" src="" ></iframe>
+
+              <div class="login-container invisible" id="login-container">
+                <div class="login-box">
+                  <form id="userform" class="userform">
+                    <label for="username">Username</label>
+                    <input id="username" type="text" name="username"
+                           autocomplete="username" class="form-control"/>
+                    <div id="tralaformblock">
+                      <label for="password">Password</label>
+                      <input id="password" type="password" name="password"
+                             autocomplete="current-password" class="form-control"/>
+                      <label>Color</label>
+                      <div id="vicinity-listColors"></div>
+                      <input id="usercolor" type="hidden" name="usercolor" value="1" />
+
+                      <label>Auto ready</label>
+                      <div class="present-switch">
+                        <p class="switch-radio">
+                          <input id="presentoff" type="radio" name="presentradio" value=""/>
+                          <label for="presentoff">Disabled</label>
+                        </p>
+                        <p class="switch-radio">
+                          <input id="presentmike" type="radio" name="presentradio" value="mike" checked />
+                          <label for="presentmike">Enable microphone</label>
+                        </p>
+                        <p class="switch-radio">
+                          <input id="presentboth" type="radio" name="presentradio" value="both"/>
+                          <label for="presentboth">Enable camera and microphone</label>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="clear"></div>
+                    <div class="connect">
+                      <input id="connectbutton" type="submit" class="btn btn-blue" value="Connect"/>
+                    </div>
+                  </form>
+                  <div class="clear"></div>
+                </div>
+              </div>
+            </div>
+            <div id="resizer"></div>
+            <div class="coln-left invisible" id="left">
+
+
+
+
               <div id="chat">
                 <div id="chatbox">
                   <div class="close-chat" id="close-chat"  title="Hide chat">
@@ -97,58 +210,49 @@
                   </div>
                 </div>
               </div>
-            </div>
-            <div id="resizer"></div>
-            <div class="coln-right" id="right">
-              <span class="show-video blink invisible" id="show-video">
-                <i class="fas fa-exchange-alt" aria-hidden="true"></i>
-              </span>
-              <div class="chat-btn show-chat invisible" id="show-chat">
-                <i class="far fa-comment-alt icon-chat" title="Show chat"></i>
-              </div>
-              <div class="chat-btn collapse-video invisible" id="collapse-video">
-                <i class="far fa-comment-alt icon-chat" title="Hide video and show chat"></i>
-              </div>
-              <div class="video-container invisible" id="video-container">
-                <div id="expand-video" class="expand-video">
-                  <div id="peers"></div>
+              <div class="vicinity-container invisible" id="vicinity-container">
+                <div class="sas">
+                  <div class="disabled-v">
+                  </div>
+                  <div class="you">
+                    you
+                  </div>
+                  <div class="your-media">
+
+                  </div>
+                </div>
+                <div id="list-zones-v"></div>
+                <div id="list-users-v"></div>
+                <div id="list-media-v"></div>
+                <div id="list-buttons-v"></div>
+                <div id="grey-backgrd">
+                  <div class="v-reply">
+                    <div id="v-dest"></div>
+                    <form id="v-inputform">
+
+                      <textarea id="v-input" class="form-reply"></textarea>
+                      <input id="v-inputbutton" type="submit" value="&#10148;" class="btn btn-default"/>
+                    </form>
+                  </div>
+                </div>
+                <div id="grey-cartoon">
+                  <div class="v-alert">
+                    Sorry :<br />you are too far !
+                  </div>
                 </div>
               </div>
-              <div class="login-container invisible" id="login-container">
-                <div class="login-box">
-                  <form id="userform" class="userform">
-                    <label for="username">Username</label>
-                    <input id="username" type="text" name="username"
-                           autocomplete="username" class="form-control"/>
-                    <label for="password">Password</label>
-                    <input id="password" type="password" name="password"
-                           autocomplete="current-password" class="form-control"/>
-                    <label>Auto ready</label>
-                    <div class="present-switch">
-                      <p class="switch-radio">
-                        <input id="presentoff" type="radio" name="presentradio" value="" checked/>
-                        <label for="presentoff">Disabled</label>
-                      </p>
-                      <p class="switch-radio">
-                        <input id="presentmike" type="radio" name="presentradio" value="mike"/>
-                        <label for="presentmike">Enable microphone</label>
-                      </p>
-                      <p class="switch-radio">
-                        <input id="presentboth" type="radio" name="presentradio" value="both"/>
-                        <label for="presentboth">Enable camera and microphone</label>
-                      </p>
-                    </div>
-                    <div class="clear"></div>
-                    <div class="connect">
-                      <input id="connectbutton" type="submit" class="btn btn-blue" value="Connect"/>
-                    </div>
-                  </form>
-                  <div class="clear"></div>
-                </div>
-              </div>
+
+
             </div>
           </div>
         </div>
+        <nav id="left-sidebar">
+          <div class="users-header">
+            <div class="galene-header"><div id="nb-users"></div></div>
+          </div>
+          <div class="header-sep"></div>
+          <div id="users"></div>
+        </nav>
       </div>
     </div>
 
@@ -277,6 +381,7 @@
         </div>
       </div>
     </div>
+
     <div id="topvideocontrols-template" class="invisible">
       <div class="top-video-controls">
         <div class="controls-button controls-right">
@@ -286,11 +391,13 @@
       </div>
     </div>
 
-    <iframe id="myIframe" src="" ></iframe>
+
+
 
     <script src="/protocol.js" defer></script>
     <script src="/scripts/toastify.js" defer></script>
     <script src="/galene.js" defer></script>
+    <script src="/vicinity.js" defer></script>
     <script src="/tralalere.js" defer></script>
   </body>
 </html>
