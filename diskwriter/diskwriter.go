@@ -16,7 +16,9 @@ import (
 	"github.com/at-wat/ebml-go/webm"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
-	"github.com/pion/webrtc/v3/pkg/media/samplebuilder"
+	"github.com/pion/webrtc/v3/pkg/media"
+
+	"github.com/jech/samplebuilder"
 
 	"github.com/jech/galene/conn"
 	"github.com/jech/galene/group"
@@ -75,7 +77,7 @@ func (client *Client) Status() map[string]interface{} {
 	return nil
 }
 
-func (client *Client) PushClient(id, username string, permissions *group.ClientPermissions, status map[string]interface{}, kind string) error {
+func (client *Client) PushClient(group, kind, id, username string, permissions group.ClientPermissions, status map[string]interface{}) error {
 	return nil
 }
 
@@ -99,6 +101,10 @@ func (client *Client) Kick(id, user, message string) error {
 	err := client.Close()
 	group.DelClient(client)
 	return err
+}
+
+func (client *Client) Joined(group, kind string) error {
+	return nil
 }
 
 func (client *Client) PushConn(g *group.Group, id string, up conn.Up, tracks []conn.UpTrack, replace string) error {
@@ -183,6 +189,7 @@ func (conn *diskConn) warn(message string) {
 func (conn *diskConn) reopen() error {
 	for _, t := range conn.tracks {
 		if t.writer != nil {
+			t.writeBuffered(true)
 			t.writer.Close()
 			t.writer = nil
 		}
@@ -205,6 +212,7 @@ func (conn *diskConn) Close() error {
 	tracks := make([]*diskTrack, 0, len(conn.tracks))
 	for _, t := range conn.tracks {
 		if t.writer != nil {
+			t.writeBuffered(true)
 			t.writer.Close()
 			t.writer = nil
 		}
@@ -249,15 +257,30 @@ func openDiskFile(directory, username string) (*os.File, error) {
 	return nil, errors.New("couldn't create file")
 }
 
+type maybeUint32 uint64
+
+const none maybeUint32 = 0
+
+func some(value uint32) maybeUint32 {
+	return maybeUint32(uint64(1<<32) | uint64(value))
+}
+
+func valid(m maybeUint32) bool {
+	return (m & (1 << 32)) != 0
+}
+
+func value(m maybeUint32) uint32 {
+	return uint32(m)
+}
+
 type diskTrack struct {
 	remote conn.UpTrack
 	conn   *diskConn
 
-	writer  webm.BlockWriteCloser
-	builder *samplebuilder.SampleBuilder
-
-	// bit 32 is a boolean indicating that the origin is valid
-	origin uint64
+	writer    webm.BlockWriteCloser
+	builder   *samplebuilder.SampleBuilder
+	lastSeqno maybeUint32
+	origin    maybeUint32
 
 	kfRequested time.Time
 	lastKf      time.Time
@@ -307,6 +330,15 @@ func newDiskConn(client *Client, directory string, up conn.Up, remoteTracks []co
 		tracks:    make([]*diskTrack, 0, len(tracks)),
 		remote:    up,
 	}
+
+	truePartitionTailChecker := func(p *rtp.Packet) bool {
+		return true
+	}
+
+	markerPartitionTailChecker := func(p *rtp.Packet) bool {
+		return p.Marker
+	}
+
 	for _, remote := range tracks {
 		var builder *samplebuilder.SampleBuilder
 		codec := remote.Codec()
@@ -316,12 +348,18 @@ func newDiskConn(client *Client, directory string, up conn.Up, remoteTracks []co
 				samplebuilder.WithPartitionHeadChecker(
 					&codecs.OpusPartitionHeadChecker{},
 				),
+				samplebuilder.WithPartitionTailChecker(
+					truePartitionTailChecker,
+				),
 			)
 		} else if strings.EqualFold(codec.MimeType, "video/vp8") {
 			builder = samplebuilder.New(
 				128, &codecs.VP8Packet{}, codec.ClockRate,
 				samplebuilder.WithPartitionHeadChecker(
 					&codecs.VP8PartitionHeadChecker{},
+				),
+				samplebuilder.WithPartitionTailChecker(
+					markerPartitionTailChecker,
 				),
 			)
 			conn.hasVideo = true
@@ -331,6 +369,9 @@ func newDiskConn(client *Client, directory string, up conn.Up, remoteTracks []co
 				samplebuilder.WithPartitionHeadChecker(
 					&codecs.VP9PartitionHeadChecker{},
 				),
+				samplebuilder.WithPartitionTailChecker(
+					markerPartitionTailChecker,
+				),
 			)
 			conn.hasVideo = true
 		} else {
@@ -338,7 +379,6 @@ func newDiskConn(client *Client, directory string, up conn.Up, remoteTracks []co
 			return nil, errors.New(
 				"cannot record codec " + codec.MimeType,
 			)
-			continue
 		}
 		track := &diskTrack{
 			remote:  remote,
@@ -443,8 +483,7 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 		return 0, nil
 	}
 
-	codec := t.remote.Codec()
-
+	// samplebuilder retains packets
 	data := make([]byte, len(buf))
 	copy(data, buf)
 	p := new(rtp.Packet)
@@ -454,6 +493,41 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 		return 0, nil
 	}
 
+	if valid(t.lastSeqno) {
+		lastSeqno := uint16(value(t.lastSeqno))
+		if ((p.SequenceNumber - lastSeqno) & 0x8000) == 0 {
+			count := p.SequenceNumber - lastSeqno
+			if count > 0 && count < 128 {
+				for i := lastSeqno + 1; i != p.SequenceNumber; i++ {
+					// different buf each time
+					buf := make([]byte, 1504)
+					n := t.remote.GetPacket(i, buf, true)
+					if n == 0 {
+						continue
+					}
+					p := new(rtp.Packet)
+					err := p.Unmarshal(buf)
+					if err == nil {
+						t.writeRTP(p)
+					}
+				}
+			}
+		}
+	}
+
+	t.lastSeqno = some(uint32(p.SequenceNumber))
+
+	err = t.writeRTP(p)
+	if err != nil {
+		return 0, err
+	}
+	return len(buf), nil
+}
+
+// writeRTP writes the packet without doing any loss recovery.
+// Called locked.
+func (t *diskTrack) writeRTP(p *rtp.Packet) error {
+	codec := t.remote.Codec()
 	if strings.EqualFold(codec.MimeType, "video/vp9") {
 		var vp9 codecs.VP9Packet
 		_, err := vp9.Unmarshal(p.Payload)
@@ -473,10 +547,25 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 
 	t.builder.Push(p)
 
+	return t.writeBuffered(false)
+}
+
+// writeBuffered writes any buffered samples to disk.  If force is true,
+// then samples will be flushed even if they are preceded by incomplete
+// samples.
+func (t *diskTrack) writeBuffered(force bool) error {
+	codec := t.remote.Codec()
+
 	for {
-		sample, ts := t.builder.PopWithTimestamp()
+		var sample *media.Sample
+		var ts uint32
+		if !force {
+			sample, ts = t.builder.PopWithTimestamp()
+		} else {
+			sample, ts = t.builder.ForcePopWithTimestamp()
+		}
 		if sample == nil {
-			return len(buf), nil
+			return nil
 		}
 
 		keyframe := true
@@ -495,7 +584,7 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 					t.conn.warn(
 						"Write to disk " + err.Error(),
 					)
-					return 0, err
+					return err
 				}
 			}
 		} else {
@@ -507,7 +596,7 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 							"Write to disk " +
 								err.Error(),
 						)
-						return 0, err
+						return err
 					}
 				}
 			}
@@ -521,22 +610,22 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 				t.remote.RequestKeyframe()
 				t.kfRequested = now
 			}
-			return 0, nil
+			return nil
 		}
 
 		if t.writer == nil {
 			continue
 		}
 
-		if t.origin == 0 {
-			t.origin = uint64(ts) | (1 << 32)
+		if !valid(t.origin) {
+			t.origin = some(ts)
 		}
-		ts -= uint32(t.origin)
+		ts -= value(t.origin)
 
 		tm := ts / (t.remote.Codec().ClockRate / 1000)
 		_, err := t.writer.Write(keyframe, int64(tm), sample.Data)
 		if err != nil {
-			return 0, err
+			return err
 		}
 	}
 }

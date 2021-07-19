@@ -343,6 +343,7 @@ function gotConnected() {
  * @param {string} reason
  */
 function gotClose(code, reason) {
+    closeUpMedia();
     setConnected(false);
     if(code != 1000) {
         console.warn('Socket close', code, reason);
@@ -1364,9 +1365,10 @@ async function addLocalMedia(localId) {
     }
 
     let old = serverConnection.findByLocalId(localId);
-    if(old && old.onclose) {
+    if(old) {
         // make sure that the camera is released before we try to reopen it
-        old.onclose.call(old, true);
+        removeFilter(old);
+        stopStream(old.stream);
     }
 
     let constraints = {audio: audio, video: video};
@@ -1499,7 +1501,7 @@ function stopStream(s) {
  * closeUpMedia closes all up connections with the given label.  If label
  * is null, it closes all up connections.
  *
- * @param {string} label
+ * @param {string} [label]
 */
 function closeUpMedia(label) {
     for(let id in serverConnection.up) {
@@ -2267,11 +2269,36 @@ function displayUsername() {
 let presentRequested = null;
 
 /**
+ * @param {string} s
+ */
+function capitalise(s) {
+    if(s.length <= 0)
+        return s;
+    return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * @param {string} title
+ */
+function setTitle(title) {
+    function set(title) {
+        document.title = title;
+        document.getElementById('title').textContent = title;
+    }
+    if(title)
+        set(title);
+    set('Galène');
+}
+
+
+/**
  * @this {ServerConnection}
  * @param {string} group
  * @param {Object<string,boolean>} perms
+ * @param {Object<string,any>} status
+ * @param {string} message
  */
-async function gotJoined(kind, group, perms, message) {
+async function gotJoined(kind, group, perms, status, message) {
     let present = presentRequested;
     presentRequested = null;
 
@@ -2299,7 +2326,7 @@ async function gotJoined(kind, group, perms, message) {
         return;
     case 'redirect':
         this.close();
-        document.location = message;
+        document.location.href = message;
         return;
     case 'leave':
         this.close();
@@ -3608,12 +3635,7 @@ async function serverConnect() {
 
 function start() {
     group = decodeURIComponent(location.pathname.replace(/^\/[a-z]*\//, ''));
-    let title = group.charAt(0).toUpperCase() + group.slice(1);
-    if(group !== '') {
-        document.title = title;
-        document.getElementById('title').textContent = title;
-    }
-
+    setTitle(capitalise(group));
     addFilters();
     setMediaChoices(false).then(e => reflectSettings());
 
