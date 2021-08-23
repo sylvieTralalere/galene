@@ -323,7 +323,7 @@ function setConnected(connected) {
         fillLogin(); //!!!!!!!!!!!!!!!!!!!!!!!! resetUsers()
         userbox.classList.add('invisible');
         connectionbox.classList.remove('invisible');
-        console.log("disconnected")
+       // console.log("disconnected")
         // displayError('Disconnected', 'error'); disabled for Tralalere
         hideVideo();
         window.onresize = null;//!!!!!!!!!!!!!
@@ -472,6 +472,8 @@ function setButtonsVisibility() {
     }else{
         //setVisibility('bullhornbutton', true);
     }
+
+    setVisibility('raise-hand-btn', !permissions.op);//
 
     setVisibility('bullhornbutton', permissions.op);
     //setVisibility('ask-for-help', permissions.op);// les aprticipants l'auront plus tard
@@ -1705,9 +1707,10 @@ async function setMedia(c, isUp, mirror, video) {
 
 
         if(c.source===null) {
+            //console.log("cas1")
             nbmedia=users[serverConnection.id].media.length;
 
-            if(users[serverConnection.id].p==="op") {
+            if(serverConnection.users[serverConnection.id].permissions.op) {
                 mediaVisible=true;
                 owner="op";
             }else{
@@ -2153,27 +2156,63 @@ function stringCompare(a, b) {
  * @param {string} id
  * @param {string} name
  */
+let timeoutsAddUser=[];
+
 function addUser(id, name) {
+
+    if(id===serverConnection.id){
+        let defaultStatus = {};
+        let u = getUserData();
+        defaultStatus.command="add";
+        defaultStatus.color=u.usercolor;
+        defaultStatus.x=v_params.ori_x;
+        defaultStatus.y=v_params.ori_y;
+        defaultStatus.bullhorn=false;
+        defaultStatus.raisedhand=false;
+        defaultStatus.timestampHelp=0;
+
+        serverConnection.userAction(
+            "setstatus", serverConnection.id, defaultStatus,
+        );
+    }
+    users[id] = {"name":"(anon)","color":"0","x":0,"y":0, "media":[],"bullhorn":false,"raisedhand":false,"localx":0,"localy":0,"expanded":0,"tnotification":0,"p":"noop"};
+
+    //timeoutsAddUser[id]=setTimeout(gereLocalUser,500,id);
+
+    if(serverConnection.permissions.op) {
+        //new Audio("../resources/sons/addUser.mp3").play();
+    }else{
+    }
 
     if(!name)
         name = null;
     // @TODO give the explaination of all the params
-    users[id] = {"name":name,"color":"#20b91e","x":v_params.ori_x,"y":v_params.ori_y, "media":[],"bullhorn":false,"localx":0,"localy":0,"expanded":0,"tnotification":0,"p":"noop"};
+   // users[id] = {"name":name,"color":"#20b91e","x":v_params.ori_x,"y":v_params.ori_y, "media":[],"bullhorn":false,"localx":0,"localy":0,"expanded":0,"tnotification":0,"p":"noop"};
 
+    /*if (typeof(users[id])==='undefined') {
+        users[id] = {"name":name,"color":"#20b91e","x":v_params.ori_x,"y":v_params.ori_y, "media":[],"bullhorn":false,"localx":0,"localy":0,"expanded":0,"tnotification":0,"p":"noop"};
+    }else{
+        users[id].name=name;
+    }*/
     let div = document.getElementById('users');
     let user = document.createElement('div');
     user.id = 'user-' + id;
     user.classList.add("user-p");
     user.textContent = name ? name : '(anon)';
+    div.onclick= function(e) {
+        let uid = e.target.id;// 3 is a max
+        let id = uid.substr(5,uid.length);
 
+        let data={command:"raiseHandOFFfromOp",id:id}
+        serverConnection.userMessage("tralacontrol", null, data, false);// noEcho = false
+
+    }
 
     // put it before since problem with return - warning : structured programming not respected with return
     addUserVicinity(id, name);
 
     let divNbUsers = document.getElementById('nb-users');
     divNbUsers.innerHTML="Participants ("+Object.keys(serverConnection.users).length+")";
-
-
 
     if(name) {
         let us = div.children;
@@ -2190,7 +2229,61 @@ function addUser(id, name) {
     }
     div.appendChild(user);
 }
+function gereLocalUser(id){
 
+    let uname = serverConnection.users[id].username;
+    let ucolor = serverConnection.users[id].status.color;
+    let ux = serverConnection.users[id].status.x;
+    let uy = serverConnection.users[id].status.y;
+    let ubullhorn = serverConnection.users[id].status.bullhorn;
+    let uraisehand = serverConnection.users[id].status.raisedhand;
+    let up="noop";
+    if(serverConnection.users[id].permissions.op) {
+        up="op";
+    }else{
+    }
+
+    //console.log(ucolor)
+    //!!!!!!users[id] = {"name":uname,"color":ucolor,"x":ux,"y":uy, "media":[],"bullhorn":ubullhorn,"raisedhand":uraisehand,"localx":0,"localy":0,"expanded":0,"tnotification":0,"p":up};
+    users[id].name=uname;
+    users[id].color=ucolor;
+    users[id].x=ux;
+    users[id].y=uy;
+    users[id].bullhorn=ubullhorn;
+    users[id].raisedhand=uraisehand;
+    users[id].p=up;
+
+
+
+    let user = document.getElementById('user-' + id);
+    user.classList.add("color"+ucolor);
+    let circlev = document.getElementById('circle-v-' + id);
+    circlev.style.backgroundColor='var(--color'+ucolor+')';
+    //let userv = document.getElementById('user-v-' + id);
+
+    let xdef=parseInt(ux);
+    let ydef=parseInt(uy);
+
+    if(id===serverConnection.id) {
+        users[serverConnection.id].currentx=ux;
+        users[serverConnection.id].currenty=uy;
+        users[serverConnection.id].initialx=ux;
+        users[serverConnection.id].initialy=uy;
+
+    }else{
+        if (ux<v_params.hall_x) {
+            xdef=v_params.out_x;
+        }else{
+        }
+    }
+    let userv = document.getElementById('user-v-' + id);
+    userv.style.left=xdef+"px";
+    userv.style.top=ydef+"px";
+    users[id].x=xdef;//!!!!! voir s'il faut faire un setStatus
+    users[id].y=ydef;
+
+
+}
 /**
  * @param {string} id
  * @param {string} name
@@ -2232,6 +2325,7 @@ function resetUsers() {
  * @param {string} kind
  */
 function gotUser(id, kind) {
+    //console.log("kind : "+kind+ ":"+id);
     switch(kind) {
     case 'add':
         addUser(id, serverConnection.users[id].username);
@@ -2244,7 +2338,36 @@ function gotUser(id, kind) {
             scheduleReconsiderParameters();
         break;
     case 'change':
+        //console.log(users[id]);
         changeUser(id, serverConnection.users[id].username);
+
+        /*if(typeof(users[id].name==="undefined")){
+            console.log("anonyme 1 !!!!!")
+        }else{
+            // already
+        }*/
+            //console.log("!"+users[id].name+"!")
+            if(users[id].name==="(anon)") {
+                //console.log("anonyme 2 !!!!!")
+                gereLocalUser(id)
+            }else{
+                let currentStatus = serverConnection.users[id].status;
+                switch(currentStatus.command){
+                    case "askForHelp":
+                    case "outOfHelp":
+                        manageHelp(id);
+                        break;
+                    case "setPos":
+                        changeUserVicinity(id);
+                    default:
+                        // bullhorn ?
+                        break;
+                }
+
+            }
+
+
+
         break;
     default:
         console.warn('Unknown user kind', kind);
@@ -2302,6 +2425,7 @@ async function gotJoined(kind, group, perms, status, message) {
     let present = presentRequested;
     presentRequested = null;
 
+    //console.log("kindgotJoined"+kind)
     switch(kind) {
     case 'fail':
         //-- for Tralalere
@@ -2340,11 +2464,6 @@ async function gotJoined(kind, group, perms, status, message) {
             pop="op";
         }else{
         }
-        let data = {c:u.usercolor, x:users[serverConnection.id].x, y:users[serverConnection.id].y, bullhorn:users[serverConnection.id].bullhorn, p:pop};
-        // notify color
-        serverConnection.userMessage("setAllData", null, data, false)
-        // ask other colors
-        serverConnection.userMessage("getAllData", null, "", true)
 
         displayUsername();
         setButtonsVisibility();
@@ -2433,51 +2552,12 @@ function gotUserMessage(id, dest, username, time, privileged, kind, message) {
         }
         break;
 
-    case 'setAllData':
-            users[id].color=message.c;
-            let user = document.getElementById('user-' + id);
-            user.classList.add("color"+message.c);
-            let circlev = document.getElementById('circle-v-' + id);
-            circlev.style.backgroundColor='var(--color'+message.c+')';
-            //let userv = document.getElementById('user-v-' + id);
 
-            let xdef=parseInt(message.x);
-            let ydef=parseInt(message.y);
 
-            if(id===serverConnection.id) {
-                users[serverConnection.id].currentx=message.x;
-                users[serverConnection.id].currenty=message.y;
-                users[serverConnection.id].initialx=message.x;
-                users[serverConnection.id].initialy=message.y;
-                /*userv.dataset.currentx=message.x;
-                userv.dataset.currenty=message.y;
-                userv.dataset.initialx=message.x;
-                userv.dataset.initialy=message.y;*/
-            }else{
-                if (message.x<v_params.hall_x) {
-                    xdef=v_params.out_x;
-                }else{
-                }
-            }
-            userv.style.left=xdef+"px";
-            userv.style.top=ydef+"px";
-            users[id].x=xdef;
-            users[id].y=ydef;
-
-            users[id].bullhorn=message.bullhorn;
-            users[id].p=message.p;
-
-            break;
-
-        case 'getAllData':
-            let u = getUserData();
-            let data = {c:u.usercolor, x:users[serverConnection.id].x, y:users[serverConnection.id].y,bullhorn:users[serverConnection.id].bullhorn,p:users[serverConnection.id].p};
-            serverConnection.userMessage("setAllData", id, data , true)
-            break;
 
 
         case 'setPos':
-
+            // garder uniquement en mode drag(e)
             //let userp = document.getElementById('user-v-' + id);
             let xdefp=parseInt(message.x);
             let  ydefp=parseInt(message.y);
@@ -2503,53 +2583,72 @@ function gotUserMessage(id, dest, username, time, privileged, kind, message) {
         case 'setPosHelp':
 
             let nbDataHelp = message.length;
+            let currentStatus = {};
 
             for(var i=0;i<nbDataHelp;i++){
                 let userph = document.getElementById('user-v-' + message[i].id);
-                let xdefph=parseInt(message[i].x);
-                let ydefph=parseInt(message[i].y);
+                if(userph===null) {
+                    console.log("souci help "+message[i].id)
+                }else{
+                    let xdefph=parseInt(message[i].x);
+                    let ydefph=parseInt(message[i].y);
 
-                userph.style.left=xdefph+"px";
-                userph.style.top=ydefph+"px";
-                users[message[i].id].x=xdefph;
-                users[message[i].id].y=ydefph;
-                users[message[i].id].currentx=xdefph;
-                users[message[i].id].currenty=ydefph;
+                    userph.style.left=xdefph+"px";
+                    userph.style.top=ydefph+"px";
+                    users[message[i].id].x=xdefph;
+                    users[message[i].id].y=ydefph;
+                    users[message[i].id].currentx=xdefph;
+                    users[message[i].id].currenty=ydefph;
 
-                // cas outforhelp
-                if(message[i].id===serverConnection.id) {
-                    if(xdefph===-3000) {
-                        updateSetting("helpMe", false);
-                        //-- button
-                        let divmuteHelpBtn = document.getElementById('ask-for-help');
-                        divmuteHelpBtn.classList.remove("muted");
+                    if(message[i].id===serverConnection.id) {
+                        // il n'y a que moi qui puisse changer les valeurs de status
+                        currentStatus = serverConnection.users[message[i].id].status;
+                        currentStatus.x=xdefph;
+                        currentStatus.y=ydefph;
+                        currentStatus.command="setPos";
+                        serverConnection.userAction(
+                            "setstatus", message[i].id, currentStatus ,
+                        );
                     }else{
                     }
-                }else{
-                }
 
-                //-- expanded
-                if (users[message[i].id].expanded==1) {
-                    // @TODO : put u=in a function :
-                    users[message[i].id].expanded=0;
-                    let btn = document.getElementById('btn-zone-v-' + message[i].id);
-                    let btnmsg = document.getElementById('btn-msg-v-' + message[i].id);
-                    userph.classList.remove("userv-expanded");
-                    btn.style.display="none";
-                    btnmsg.style.display="none";
+                    // cas outforhelp
 
-                    for(var i=0;i<users[message[i].id].media.length;i++){
-                        if(users[message[i].id].media[i].expanded===0) {
-                            let peerid = "peer-"+users[message[i].id].media[i].id.substr(6,2);
-                            let div = document.getElementById(peerid);
-                            div.style.display="none";
+                    if(message[i].id===serverConnection.id) {
+                        if(xdefph===-3000) {
+                            updateSetting("helpMe", false);
+                            //-- button
+                            let divmuteHelpBtn = document.getElementById('ask-for-help');
+                            divmuteHelpBtn.classList.remove("muted");
                         }else{
-                            // expanded
                         }
+                    }else{
                     }
-                }else{
-                    // already 0
+
+                    //-- expanded
+                    if (users[message[i].id].expanded==1) {
+                        // @TODO : put u=in a function :
+                        users[message[i].id].expanded=0;
+                        let btn = document.getElementById('btn-zone-v-' + message[i].id);
+                        let btnmsg = document.getElementById('btn-msg-v-' + message[i].id);
+                        userph.classList.remove("userv-expanded");
+                        btn.style.display="none";
+                        btnmsg.style.display="none";
+
+                        for(var i=0;i<users[message[i].id].media.length;i++){
+                            if(users[message[i].id].media[i].expanded===0) {
+                                let peerid = "peer-"+users[message[i].id].media[i].id.substr(6,2);
+                                let div = document.getElementById(peerid);
+                                div.style.display="none";
+                            }else{
+                                // expanded
+                            }
+                        }
+                    }else{
+                        // already 0
+                    }
                 }
+
 
             }
 
@@ -2627,41 +2726,14 @@ function gotUserMessage(id, dest, username, time, privileged, kind, message) {
 
             break;
 
-        case 'setVideo':
-            /*if(message===true) {
-                document.getElementById('myIframe').src = '../resources/videos/index.html';
-                document.getElementById('myIframe').style.zIndex=2000;
-            }else{
-                document.getElementById('myIframe').src = '../resources/empty.html';
-                document.getElementById('myIframe').style.zIndex='unset';
-            }*/
-            break;
 
-        case 'setStory':
-            if(message===true) {
-                document.getElementById('myIframe').src = 'https://boubs.fr/code-decode/';//https://boubs.fr/storyline/';
-                document.getElementById('myIframe').style.zIndex=2000;
-                document.getElementById('myIframe').style.display="block";
-            }else{
-                document.getElementById('myIframe').src = '../resources/empty.html';
-                document.getElementById('myIframe').style.zIndex='unset';
-                document.getElementById('myIframe').style.display="none";
-            }
-            break;
 
-        case 'setVideoMode':
-            let myIframe=document.getElementById('myIframe');
-            if(message==='play') {
-                // envoi du parent vers iframe :-----------
-                 myIframe.contentWindow.postMessage("pVideoPlay", '*');
-            }else{
-                myIframe.contentWindow.postMessage("pVideoPause", '*');
-            }
-            break;
+
+
         case 'goStep1':
             myTralaStep=1;
 
-            console.log("usermessage goStep1");
+            //console.log("usermessage goStep1");
             document.getElementById('myIframe').src = '../resources/empty.html';
             document.getElementById('myIframe').style.zIndex='unset';
             document.getElementById('myIframe').style.display="none";
@@ -2707,7 +2779,7 @@ function gotUserMessage(id, dest, username, time, privileged, kind, message) {
             break;
         case 'goStep4':
             myTralaStep=4;
-            console.log("usermessage goStep4");
+           // console.log("usermessage goStep4");
             document.getElementById('myIframe').src = '../resources/empty.html';
             document.getElementById('myIframe').style.zIndex='unset';
             document.getElementById('myIframe').style.display="none";

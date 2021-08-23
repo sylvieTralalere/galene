@@ -64,3 +64,23 @@
 .invisible-trala{
     display:none;
 }
+.raiseHand{
+    color:#FF0000;
+
+}
+.raiseHand::after {
+    content: "\f256";
+    font-family: 'Font Awesome 5 Free';
+    color: #FF0000;
+    margin-left: 5px;
+    font-weight: 900;
+}
+#infobulle{
+    background-color:rgba(255,255,0,0.8);
+    padding:5px;
+    font-size:10px;
+    color:#000;
+    position:absolute;
+    display:none;
+    z-index:2;
+}

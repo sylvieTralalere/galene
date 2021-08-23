@@ -18,52 +18,33 @@ function loadSteps(){
     updateSetting("muteAll", false);
     updateSetting("showChat", false);
     updateSetting("helpMe", false);
+    updateSetting("raiseHand", false);
 
 }
 
-
-getButtonElement('maquetteVideo').onclick = function(e) {
+document.getElementById('raise-hand-btn').onclick = function(e) {
     e.preventDefault();
-    storyMode=false;
-    if(videoMode===false) {
-        videoMode=true;
-        document.getElementById('myIframe').src = '../resources/videos/index.html';
-        document.getElementById('myIframe').style.zIndex=2000;
-        document.getElementById('myIframe').style.display="block";
+    let raiseHand = getSettings().raiseHand;
+    raiseHand = !raiseHand;
+    updateSetting("raiseHand", raiseHand);
+
+    //-- button
+    let divRaiseHandBtn = document.getElementById('raise-hand-btn');
+    let div=document.getElementById('user-'+serverConnection.id);
+    let data={command:"",id:serverConnection.id};
+    if(raiseHand===true) {
+        divRaiseHandBtn.classList.add("muted")
+        div.classList.add("raiseHand")
+        data.command="raiseHandON";
+        serverConnection.userMessage("tralacontrol", null, data, true);// noEcho = true
     }else{
-        videoMode=false;
-        document.getElementById('myIframe').src = '../resources/empty.html';
-        document.getElementById('myIframe').style.zIndex='unset';// pour rafraichir
-        document.getElementById('myIframe').style.display="none";
-
+        divRaiseHandBtn.classList.remove("muted")
+        div.classList.remove("raiseHand")
+        data.command="raiseHandOFF";
+        serverConnection.userMessage("tralacontrol", null, data, true);// noEcho = true
     }
-    serverConnection.userMessage("setVideo", null, videoMode, false);
+
 };
-
-getButtonElement('maquetteStoryline').onclick = function(e) {
-    e.preventDefault();
-    videoMode=false;
-    //console.log(storyMode)
-    if(storyMode===false) {
-        storyMode=true;
-        getButtonElement('maquetteStoryline').innerHTML="Hide Storyline";
-        document.getElementById('myIframe').src = 'https://boubs.fr/code-decode/';//https://boubs.fr/storyline/';
-        document.getElementById('myIframe').style.zIndex=2000;
-        document.getElementById('myIframe').style.display="block";
-    }else{
-        storyMode=false;
-        getButtonElement('maquetteStoryline').innerHTML="Show Storyline";
-        //console.log("aucun")
-        document.getElementById('myIframe').src = '../resources/empty.html';
-        document.getElementById('myIframe').style.zIndex='unset';// pour rafraichir
-        document.getElementById('myIframe').style.display="none";
-
-    }
-    serverConnection.userMessage("setStory", null, storyMode, false);
-};
-
-
-
 document.getElementById('participant-btn').onclick = function(e) {
     e.preventDefault();
     let participants = getSettings().participants;
@@ -94,16 +75,20 @@ document.getElementById('mute-all-btn').onclick = function(e) {
     let divmuteAllBtn = document.getElementById('mute-all-btn');
     let icon = divmuteAllBtn.querySelector("span .fa");
 
+    let data={command:"",id:serverConnection.id};
     if(muteAll===true) {
         icon.classList.add('fa-microphone-alt-slash');
         icon.classList.remove('fa-microphone-alt');
         divmuteAllBtn.classList.add("muted");
-        serverConnection.userMessage("tralacontrol", null, "muteallON", false);
+        data.command="muteallON";
+        serverConnection.userMessage("tralacontrol", null, data, false);
+
     }else{
         icon.classList.remove('fa-microphone-alt-slash');
         icon.classList.add('fa-microphone-alt');
         divmuteAllBtn.classList.remove("muted");
-        serverConnection.userMessage("tralacontrol", null, "muteallOFF", false);
+        data.command="muteallOFF";
+        serverConnection.userMessage("tralacontrol", null, data, false);
 
     }
 };
@@ -117,16 +102,57 @@ document.getElementById('ask-for-help').onclick = function(e) {
     //-- button
     let divmuteHelpBtn = document.getElementById('ask-for-help');
 
+    let data={command:"",id:serverConnection.id};
     if(helpMe===true) {
         divmuteHelpBtn.classList.add("muted");
         setVisibility('left', true);
         //positionUser();
-        serverConnection.userMessage("tralacontrol", null, "askForHelp", false);// noEcho=true
+        data.command="askForHelp";
+        data.timestampHelp=Date.now();
+        //serverConnection.userMessage("tralacontrol", null, data, false);// noEcho=true
     }else{
         divmuteHelpBtn.classList.remove("muted");
         //unPositionUser();
-        serverConnection.userMessage("tralacontrol", null, "outForHelp", false);// noEcho=true
+        data.command="outOfHelp";
+        data.timestampHelp=0;
+        //serverConnection.userMessage("tralacontrol", null, data, false);// noEcho=true
     }
+
+    let sendCommand = true;
+    if(helpMe===true) {
+        let usersHelp=[];
+        let nbHelp=0;
+        for(let uid in serverConnection.users) {
+            let u = serverConnection.users[uid];
+            if((u.status.timestampHelp===0)||(u.permissions.op)) {
+                // no help
+            }else{
+                nbHelp+=1;
+            }
+        }
+        if (nbHelp> v_params.positionsHelp.length-2) {
+            sendCommand = false;
+            displayError("Pour l'instant il y a trop de personnes dans le help center");
+            updateSetting("helpMe", false);
+            let divmuteHelpBtn = document.getElementById('ask-for-help');
+            divmuteHelpBtn.classList.remove("muted");
+        }else{
+            //OK
+        }
+    }else{
+        // OK
+    }
+
+    if(sendCommand===true) {
+        let currentStatus = serverConnection.users[serverConnection.id].status;
+        currentStatus.command=data.command;
+        currentStatus.timestampHelp=data.timestampHelp;
+        serverConnection.userAction(
+            "setstatus", serverConnection.id, currentStatus,
+        );
+    }else{
+    }
+
 
 };
 //--------------------
@@ -166,7 +192,27 @@ function profileAnalysis(){
 }
 
 function gereControl(id,message){
-    switch(message){
+    switch(message.command){
+        case "raiseHandON":
+            let div=document.getElementById('user-'+id);
+            div.classList.add("raiseHand")
+            break;
+        case "raiseHandOFF":
+            let divOff=document.getElementById('user-'+id);
+            divOff.classList.remove("raiseHand");
+            break;
+
+        case "raiseHandOFFfromOp":
+
+            let divOffop=document.getElementById('user-'+message.id);
+            divOffop.classList.remove("raiseHand");
+            updateSetting("raiseHand", false);
+            if(message.id===serverConnection.id) {
+                let divRaiseHandBtn = document.getElementById('raise-hand-btn');
+                divRaiseHandBtn.classList.remove("muted")
+            }else{
+            }
+            break
         case "muteallON":
             if(serverConnection.permissions.op) {
             }else{
@@ -184,17 +230,26 @@ function gereControl(id,message){
             break;
 
         case "helpOFF":
-            /*updateSetting("helpMe", false);
+            console.log("helpOff me");
+            updateSetting("helpMe", false);
             //-- button
             let divmuteHelpBtn = document.getElementById('ask-for-help');
             divmuteHelpBtn.classList.remove("muted");
-            unPositionUser();*/
+
+            let data={command:"outOfHelp",timestampHelp:0};
+            let currentStatus = serverConnection.users[serverConnection.id].status;
+            currentStatus.command=data.command;
+            currentStatus.timestampHelp=data.timestampHelp;
+            serverConnection.userAction(
+                "setstatus", serverConnection.id, currentStatus,
+            );
+
 
 
             break;
 
         case "askForHelp":
-
+            /*
             if(serverConnection.permissions.op) {
                 //console.log(serverConnection.id);
                 //console.log(id);
@@ -234,10 +289,11 @@ function gereControl(id,message){
             }else{
                 // no op
             }
-
+*/
             break
 
         case "outForHelp":
+            /*
             if(serverConnection.permissions.op) {
                 //console.log(serverConnection.id);
                 //console.log(id);
@@ -247,26 +303,33 @@ function gereControl(id,message){
             }else{
                 // no op
             }
-
+*/
             break
     }
 
 }
-function hOutForHelp(id){
-    let data=[];
-    let founded = usersHelp.indexOf(id);
-    if(founded>=0) {
-        usersHelp.splice(founded, 1);
-        data[0]={};
-        data[0].x=-3000;
-        data[0].y=0;
-        data[0].id=id;
+function hOutForHelp(id){ // à factoriser avec ce qui suit
 
-    }else{
-        // no founded
-    }
+    let data=[];
+    data[0]={};
+    data[0].x=-3000;
+    data[0].y=0;
+    data[0].id=id;
     //console.log(usersHelp);
 
+    let usersHelp=[];
+    for(let uid in serverConnection.users) {
+        let u = serverConnection.users[uid];
+        if((u.status.timestampHelp===0)||(u.permissions.op)) {
+            // no help
+        }else{
+            usersHelp[usersHelp.length]={id:uid,timestamp:u.status.timestampHelp}
+        }
+    }
+    // sort by timestamp
+    usersHelp.sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp));
+
+    // positions --------------
     for(var i=0;i<usersHelp.length;i++){
         let j=i+1;
 
@@ -274,10 +337,107 @@ function hOutForHelp(id){
         data[indice]={};
         data[indice].x=v_params.positionsHelp[j][0];
         data[indice].y=v_params.positionsHelp[j][1];
-        data[indice].id=usersHelp[i];
+        data[indice].id=usersHelp[i].id;
     }
     serverConnection.userMessage("setPosHelp", null, data, false);
 }
+
+
+function manageHelp(id){
+
+    if(serverConnection.permissions.op) {
+        let data=[];
+
+        //-- the op himself -------------------
+        if(id===serverConnection.id) {
+            data[0]={};
+            data[0].x=v_params.positionsHelp[0][0];
+            data[0].y=v_params.positionsHelp[0][1];
+            let currentStatus = serverConnection.users[serverConnection.id].status;
+            currentStatus.x=data[0].x;
+            currentStatus.y=data[0].y;
+            currentStatus.command="setPos";
+            serverConnection.userAction(
+                "setstatus", serverConnection.id, currentStatus ,
+            );
+        }else{
+            //-- outOfHelp -----
+            let currentu = serverConnection.users[id];
+
+            if(currentu.status.command==="outOfHelp") {
+                data[0]={};
+                data[0].x=-3000;
+                data[0].y=0;
+                data[0].id=id;
+            }else{
+                // no out
+            }
+            //-- the others -------------------
+
+            let usersHelp=[];
+            for(let uid in serverConnection.users) {
+                let u = serverConnection.users[uid];
+                if((u.status.timestampHelp===0)||(u.permissions.op)) {
+                    // no help
+                }else{
+                    usersHelp[usersHelp.length]={id:uid,timestamp:u.status.timestampHelp}
+                }
+            }
+            // sort by timestamp
+            usersHelp.sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp));
+            //console.log(usersHelp)
+
+            // positions --------------
+            for(var i=0;i<usersHelp.length;i++){
+                let j=i+1;
+
+                let indice = data.length;
+                data[indice]={};
+                data[indice].x=v_params.positionsHelp[j][0];
+                data[indice].y=v_params.positionsHelp[j][1];
+                data[indice].id=usersHelp[i].id;
+            }
+            console.log(data)
+            serverConnection.userMessage("setPosHelp", null, data, false);
+        }
+
+    }else{
+        // no op
+    }
+    // retrive help
+    /*
+        //console.log(serverConnection.id);
+        //console.log(id);
+        let nbHelp = usersHelp.length;
+        let data=[];
+
+        if(id === serverConnection.id) {
+            data[0]={};
+            data[0].x=v_params.positionsHelp[0][0];
+            data[0].y=v_params.positionsHelp[0][1];
+            data[0].id=id;
+            serverConnection.userMessage("setPosHelp", null, data, false);
+        }else{
+            if(nbHelp<v_params.positionsHelp.length-2) {
+                usersHelp[usersHelp.length] = id;
+                for(var i=0;i<usersHelp.length;i++){
+                    let j=i+1;
+
+                    let indice = data.length;
+                    data[indice]={};
+                    data[indice].x=v_params.positionsHelp[j][0];
+                    data[indice].y=v_params.positionsHelp[j][1];
+                    data[indice].id=usersHelp[i];
+                }
+                serverConnection.userMessage("setPosHelp", null, data, false);
+            }else{
+                serverConnection.userMessage("tooManyHelp", id, "unused", true);// noecho=true
+            }
+        }
+*/
+}
+
+
 function refreshSteps(nb){
     myIframe=document.getElementById('mySteps');
     myIframe.contentWindow.postMessage("goStep"+nb, '*');
@@ -320,13 +480,9 @@ window.onmessage = function (e) {
             serverConnection.userMessage("goStep4", null, 'messageUnused', false); //le false = noEcho = false donc echo = true !!!
             break;
     }
-    /*if(e.data=='ifVideoPlay') {
-        serverConnection.userMessage("setVideoMode", null, 'play', false);
-    }else{
-    }
-    if(e.data=='ifVideoPause') {
-        serverConnection.userMessage("setVideoMode", null, 'pause', false);
-    }else{
-    }*/
-}
 
+}
+/*
+window.onbeforeunload = function () {
+    return 'Voulez-vous vraiment quitter la page ?';
+}*/

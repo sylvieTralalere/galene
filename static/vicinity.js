@@ -117,7 +117,7 @@ function setVicinity(state){
 
         }
         updateSetting("vicinity", state);
-
+        computeVolume();
         resizePeers();
     }
 
@@ -289,12 +289,16 @@ function addUserVicinity(id, name){
         user.addEventListener("mouseout", dragOut, false);
 
     }else{
+
+        user.addEventListener("mouseover", mouseOver, false);
+        user.addEventListener("mouseout", mouseOut, false);
     }
 
     user.addEventListener("touchstart", dragStart, false);
     user.addEventListener("mousedown", dragStart, false);
 
     user.addEventListener("contextmenu", rightClick, false);
+
 
     //-- zones ---
     div = document.getElementById('list-zones-v');
@@ -330,8 +334,9 @@ function addUserVicinity(id, name){
         let confirmClose=confirm("voulez-vous vraiment retirer ce participant du help center ?");
         if(confirmClose) {
 
-            hOutForHelp(id);
-            //serverConnection.userMessage("tralacontrol", indexid, "helpOFF", true);// noecho = true
+            //hOutForHelp(indexid);
+            console.log(indexid)
+            serverConnection.userMessage("tralacontrol", indexid, {command:"helpOFF",id:indexid}, true);// noecho = true
         }else{
         }
        /*
@@ -382,6 +387,32 @@ function addUserVicinity(id, name){
 /**
  * @param {string} id
  */
+function changeUserVicinity(id) {
+    let userv = document.getElementById('user-v-' + id);
+    let currentStatus = serverConnection.users[id].status;
+
+    let xdefp=currentStatus.x;
+    let ydefp=currentStatus.y;
+
+    if(id===serverConnection.id) {
+        // ne pas traiter
+    }else{
+        if (xdefp<v_params.hall_x) {
+            xdefp=v_params.out_x;
+        }else{
+        }
+    }
+    userv.style.left=xdefp+"px";
+    userv.style.top=ydefp+"px";
+    users[id].x=xdefp;
+    users[id].y=ydefp;
+
+    // volume
+    computeVolume();
+}
+/**
+ * @param {string} id
+ */
 function delUserVicinity(id) {
     // @TODO remove eventlisteners
     let div = document.getElementById('list-users-v');
@@ -397,12 +428,64 @@ function delUserVicinity(id) {
     div.removeChild(user);
     user = document.getElementById('btn-msg-v-' + id);
     div.removeChild(user);
-}
 
+    if(serverConnection.permissions.op) {
+        let founded = usersHelp.indexOf(id);
+
+        if(founded>=0) {
+
+            usersHelp.splice(founded, 1);
+            let data=[];
+            for(var i=0;i<usersHelp.length;i++){
+                let j=i+1;
+
+                let indice = data.length;
+                data[indice]={};
+                data[indice].x=v_params.positionsHelp[j][0];
+                data[indice].y=v_params.positionsHelp[j][1];
+                data[indice].id=usersHelp[i];
+            }
+            serverConnection.userMessage("setPosHelp", null, data, false);
+
+        }else{
+            // no founded
+        }
+    }else{
+    }
+}
+/**
+ * @param {Object} e
+ */
+function mouseOver(e) {
+
+    let uid = e.target.id.substr(7,e.target.id.length);
+    let div = document.getElementById("infobulle");
+
+    if(users[uid].expanded===0) {
+        div.style.display="inline-block";
+        div.innerHTML=users[uid].name;
+        div.style.top=(users[uid].y)+"px";
+        div.style.left=(users[uid].x+25-(div.offsetWidth/2))+"px";
+    }else{
+        document.getElementById("infobulle").style.display="none";
+    }
+
+
+   // console.log(div.offsetWidth);
+
+
+}
+/**
+ * @param {Object} e
+ */
+function mouseOut(e) {
+    document.getElementById("infobulle").style.display="none";
+}
 /**
  * @param {Object} e
  */
 function rightClick(e) {
+
 
     e.preventDefault();
     v_DOMevts.rightClick=true;
@@ -485,7 +568,7 @@ function rightClick(e) {
 
             var alluserv = document.getElementsByClassName("user-v");
             for (var i=0; i < alluserv.length; i++) {
-                console.log(alluserv[i].id);
+                //console.log(alluserv[i].id);
                 alluserv[i].style.zIndex=1;
             }
             target.style.zIndex=2;
@@ -499,6 +582,8 @@ function rightClick(e) {
     }else{
 
     }
+
+    document.getElementById("infobulle").style.display="none";
     return false;
 }
 /**
@@ -526,6 +611,8 @@ function dragOver(e) {
     let target=e.target;
     let circle = target.children[0];
     circle.style.borderColor="#000";
+
+
 }
 /**
  * @param {Object} e
@@ -695,6 +782,13 @@ function drag(e) {
                         users[serverConnection.id].y=data.y;
                         computeVolume();
                         computeEye();
+
+                        /*let currentStatus = serverConnection.users[serverConnection.id].status;
+                        currentStatus.x=data.x;
+                        currentStatus.y=data.y;
+                        serverConnection.userAction(
+                            "setstatus", serverConnection.id, currentStatus,
+                        );*/
                         serverConnection.userMessage("setPos", null, data, true);
 
                         //-- sound zone -----------------
@@ -801,7 +895,15 @@ function dragEnd(e) {
                         //console.log(data.x+","+data.y);
                         computeVolume();
                         computeEye();
-                        serverConnection.userMessage("setPos", null, data, true);
+
+                        let currentStatus = serverConnection.users[serverConnection.id].status;
+                        currentStatus.x=data.x;
+                        currentStatus.y=data.y;
+                        currentStatus.command="setPos";
+                        serverConnection.userAction(
+                            "setstatus", serverConnection.id, currentStatus,
+                        );
+                        //serverConnection.userMessage("setPos", null, data, true);
 
                     }else{
                         // participants
@@ -942,6 +1044,7 @@ function dragEnd(e) {
 /**
  * @param {number} userid
  */
+/*
 function positionUser(){//!!!!!!! obsolete ?
     let newx = -3000;
     let newy = 0;
@@ -1047,7 +1150,7 @@ function propagatePosition(id,data){ //!!!!!!! obsolete ?
     computeEye();
     serverConnection.userMessage("setPos", null, data, true);
 }
-
+*/
 
 /**
  * @param {number} userid
@@ -1131,6 +1234,7 @@ function distancePoints(xm, ym, x,y) {
 
 function computeVolume(){
     let currentVicinity = getSettings().vicinity;
+    //console.log(currentVicinity);
 
     for(var key in users) {
         if(key===serverConnection.id) {
@@ -1138,7 +1242,7 @@ function computeVolume(){
 
         }else{
             let volume= 1;
-            if(( users[key].bullhorn===true)||(myTralaStep==1)||(myTralaStep==4) ){//!!!!!! rendre universel
+            if(( users[key].bullhorn===true)|| (currentVicinity==="off") ){//!!!!!! rendre universel(myTralaStep==1)||(myTralaStep==4)
                 // all is high
                 //console.log("cas 1")
             }else{
@@ -1253,6 +1357,12 @@ document.getElementById('bullhornbutton').onclick = function(e) {
         divHornBtn.classList.remove("muted")
     }
     //-- notification
+    let currentStatus = serverConnection.users[serverConnection.id].status;
+    currentStatus.bullhorn=bullhorn;
+    currentStatus.command="setBullhorn";
+    serverConnection.userAction(
+        "setstatus", serverConnection.id, currentStatus ,
+    );
     serverConnection.userMessage("setBullhorn", null, bullhorn, true);
 
 };
@@ -1437,7 +1547,7 @@ function vicinityStart() {
         radius:80,
         delay_notification:8000,
                        // 0 réservé à animateur
-        positionsHelp:[[140,156],[95,182],[140,208],[185,182],[185,130],[140,104],[95,130],[50,156],[50,208],[95,234],[140,260],[185,234],[230,208],[230,156],[230,104],[185,78],[140,52],[95,78],[50,104]]
+        positionsHelp:[[140,156],[95,182],[140,208],[185,182],[185,130],[140,104],[95,130],[50,156],[50,208],[95,234],[140,260],[185,234],[230,208],[230,156],[230,104],[185,78],[140,52],[95,78],[50,104],[50,52],[5,78],[5,130],[5,182],[5,234],[50,260],[95,286],[140,312],[185,286],[230,260],[275,234],[275,182],[275,130],[275,78],[230,0],[230,52],[185,26],[140,0],[95,26]]
     };
     // color interface
 
