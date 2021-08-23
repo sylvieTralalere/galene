@@ -188,23 +188,23 @@ var badClients = []testClient{
 var goodClients = []testClientPerm{
 	{
 		testClient{"jch", "topsecret"},
-		ClientPermissions{true, true, false},
+		ClientPermissions{Op: true, Present: true},
 	},
 	{
 		testClient{"john", "secret"},
-		ClientPermissions{false, true, false},
+		ClientPermissions{Present: true},
 	},
 	{
 		testClient{"john", "secret2"},
-		ClientPermissions{false, true, false},
+		ClientPermissions{Present: true},
 	},
 	{
 		testClient{"james", "secret3"},
-		ClientPermissions{false, false, false},
+		ClientPermissions{},
 	},
 	{
 		testClient{"paul", "secret3"},
-		ClientPermissions{false, false, false},
+		ClientPermissions{},
 	},
 }
 
@@ -236,4 +236,30 @@ func TestPermissions(t *testing.T) {
 		})
 	}
 
+}
+
+func TestFmtpValue(t *testing.T) {
+	type fmtpTest struct {
+		fmtp  string
+		key   string
+		value string
+	}
+	fmtpTests := []fmtpTest{
+		{"", "foo", ""},
+		{"profile-id=0", "profile-id", "0"},
+		{"profile-id=0", "foo", ""},
+		{"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", "profile-level-id", "42001f"},
+		{"foo=1;bar=2;quux=3", "foo", "1"},
+		{"foo=1;bar=2;quux=3", "bar", "2"},
+		{"foo=1;bar=2;quux=3", "fu", ""},
+	}
+
+	for _, test := range fmtpTests {
+		v := fmtpValue(test.fmtp, test.key)
+		if v != test.value {
+			t.Errorf("fmtpValue(%v, %v) = %v, expected %v",
+				test.fmtp, test.key, v, test.value,
+			)
+		}
+	}
 }

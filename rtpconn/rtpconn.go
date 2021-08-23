@@ -14,6 +14,7 @@ import (
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 
+	"github.com/jech/galene/codecs"
 	"github.com/jech/galene/conn"
 	"github.com/jech/galene/estimator"
 	"github.com/jech/galene/group"
@@ -128,8 +129,12 @@ func (down *rtpDownTrack) SetCname(cname string) {
 }
 
 type layerInfo struct {
+	// current sid, desired sid, and max sid seen
 	sid, wantedSid, maxSid uint8
+	// current tid, desired tid, and max tid seen
 	tid, wantedTid, maxTid uint8
+	// if true, stick to sid 0
+	limitSid bool
 }
 
 func (down *rtpDownTrack) getLayerInfo() layerInfo {
@@ -138,6 +143,7 @@ func (down *rtpDownTrack) getLayerInfo() layerInfo {
 		sid:       uint8((info & 0xF)),
 		wantedSid: uint8((info >> 4) & 0xF),
 		maxSid:    uint8((info >> 8) & 0xF),
+		limitSid:  ((info >> 12) & 1) != 0,
 		tid:       uint8((info >> 16) & 0xF),
 		wantedTid: uint8((info >> 20) & 0xF),
 		maxTid:    uint8((info >> 24) & 0xF),
@@ -145,10 +151,15 @@ func (down *rtpDownTrack) getLayerInfo() layerInfo {
 }
 
 func (down *rtpDownTrack) setLayerInfo(info layerInfo) {
+	var l uint32
+	if info.limitSid {
+		l = 1 << 12
+	}
 	atomic.StoreUint32(&down.atomics.layerInfo,
 		uint32(info.sid&0xF)|
 			uint32(info.wantedSid&0xF)<<4|
 			uint32(info.maxSid&0xF)<<8|
+			l|
 			uint32(info.tid&0xF)<<16|
 			uint32(info.wantedTid&0xF)<<20|
 			uint32(info.maxTid&0xF)<<24,
@@ -213,59 +224,73 @@ var packetBufPool = sync.Pool{
 func (down *rtpDownTrack) Write(buf []byte) (int, error) {
 	codec := down.remote.Codec().MimeType
 
-	flags, err := getPacketFlags(codec, buf)
+	flags, err := codecs.PacketFlags(codec, buf)
 	if err != nil {
 		return 0, err
 	}
 
 	layer := down.getLayerInfo()
 
-	if flags.tid > layer.maxTid || flags.sid > layer.maxSid {
-		if flags.tid > layer.maxTid {
+	if flags.Tid > layer.maxTid || flags.Sid > layer.maxSid {
+		if flags.Tid > layer.maxTid {
+			// increase eagerly if this is the first time we
+			// see a given layer
 			if layer.tid == layer.maxTid {
-				layer.wantedTid = flags.tid
-				layer.tid = flags.tid
+				layer.wantedTid = flags.Tid
+				layer.tid = flags.Tid
 			}
-			layer.maxTid = flags.tid
+			layer.maxTid = flags.Tid
 		}
-		if flags.sid > layer.maxSid {
-			if layer.sid == layer.maxSid {
-				layer.wantedSid = flags.sid
-				layer.sid = flags.sid
+		if flags.Sid > layer.maxSid {
+			if layer.sid == layer.maxSid && !layer.limitSid {
+				layer.wantedSid = flags.Sid
+				layer.sid = flags.Sid
 			}
-			layer.maxSid = flags.sid
+			layer.maxSid = flags.Sid
 		}
 		down.setLayerInfo(layer)
 		down.adjustLayer()
+		layer = down.getLayerInfo()
 	}
-	if flags.start && (layer.tid != layer.wantedTid) {
-		if layer.wantedTid < layer.tid || flags.tidupsync {
+
+	if flags.Start && (layer.tid != layer.wantedTid) {
+		if flags.Keyframe {
 			layer.tid = layer.wantedTid
 			down.setLayerInfo(layer)
-		}
-	}
-
-	if flags.start && (layer.sid != layer.wantedSid) {
-		if flags.sidsync {
-			layer.sid = layer.wantedTid
+		} else if layer.wantedTid < layer.tid {
+			layer.tid = layer.wantedTid
+			down.setLayerInfo(layer)
+		} else if flags.TidUpSync && flags.Tid <= layer.wantedTid {
+			layer.tid = flags.Tid
 			down.setLayerInfo(layer)
 		}
 	}
 
-	if flags.tid > layer.tid || flags.sid > layer.sid ||
-		(flags.sid < layer.sid && flags.sidnonreference) {
-		ok := down.packetmap.Drop(flags.seqno, flags.pid)
+	if flags.Start && (layer.sid != layer.wantedSid) {
+		if flags.Keyframe {
+			layer.sid = layer.wantedSid
+			down.setLayerInfo(layer)
+		} else {
+			down.remote.RequestKeyframe()
+		}
+	}
+
+	if flags.Tid > layer.tid || flags.Sid > layer.sid ||
+		(flags.Sid < layer.sid && flags.SidNonReference) {
+		ok := down.packetmap.Drop(flags.Seqno, flags.Pid)
 		if ok {
 			return 0, nil
 		}
 	}
 
-	ok, newseqno, piddelta := down.packetmap.Map(flags.seqno, flags.pid)
+	ok, newseqno, piddelta := down.packetmap.Map(flags.Seqno, flags.Pid)
 	if !ok {
 		return 0, nil
 	}
 
-	if newseqno == flags.seqno && piddelta == 0 {
+	setMarker := flags.Sid == layer.sid && flags.End && !flags.Marker
+
+	if !setMarker && newseqno == flags.Seqno && piddelta == 0 {
 		return down.write(buf)
 	}
 
@@ -274,7 +299,7 @@ func (down *rtpDownTrack) Write(buf []byte) (int, error) {
 	buf2 := ibuf2.([]byte)
 
 	n := copy(buf2, buf)
-	err = rewritePacket(codec, buf2[:n], newseqno, piddelta)
+	err = codecs.RewritePacket(codec, buf2[:n], setMarker, newseqno, piddelta)
 	if err != nil {
 		return 0, err
 	}
@@ -303,20 +328,38 @@ func (t *rtpDownTrack) GetMaxBitrate() (uint64, int, int) {
 	return r, int(layer.sid), int(layer.tid)
 }
 
+// adjustLayer checks the allowable bitrate reported for a down track and
+// adjusts the layer by one step.  It prefers temporal layers, and only
+// uses spatial layers as a last resort.
 func (t *rtpDownTrack) adjustLayer() {
 	max, _, _ := t.GetMaxBitrate()
 	r, _ := t.rate.Estimate()
 	rate := uint64(r) * 8
 	if rate < max*7/8 {
+		// switch up
 		layer := t.getLayerInfo()
-		if layer.tid < layer.maxTid {
+		if layer.limitSid && layer.wantedSid != 0 {
+			layer.wantedSid = 0
+			t.setLayerInfo(layer)
+		} else if !layer.limitSid && layer.sid < layer.maxSid {
+			layer.wantedSid = layer.sid + 1
+			t.setLayerInfo(layer)
+		} else if layer.tid < layer.maxTid {
 			layer.wantedTid = layer.tid + 1
 			t.setLayerInfo(layer)
 		}
 	} else if rate > max*3/2 {
+		// switch down
 		layer := t.getLayerInfo()
 		if layer.tid > 0 {
 			layer.wantedTid = layer.tid - 1
+			t.setLayerInfo(layer)
+		} else if layer.sid > 0 {
+			if layer.limitSid {
+				layer.wantedSid = 0
+			} else {
+				layer.wantedSid = layer.sid - 1
+			}
 			t.setLayerInfo(layer)
 		}
 	}
@@ -352,12 +395,13 @@ func (down *rtpDownConnection) flushICECandidates() error {
 }
 
 type rtpUpTrack struct {
-	track  *webrtc.TrackRemote
-	conn   *rtpUpConnection
-	rate   *estimator.Estimator
-	cache  *packetcache.Cache
-	jitter *jitter.Estimator
-	cname  atomic.Value
+	track    *webrtc.TrackRemote
+	receiver *webrtc.RTPReceiver
+	conn     *rtpUpConnection
+	rate     *estimator.Estimator
+	cache    *packetcache.Cache
+	jitter   *jitter.Estimator
+	cname    atomic.Value
 
 	actionCh   chan struct{}
 	readerDone chan struct{}
@@ -629,6 +673,7 @@ func newUpConn(c group.Client, id string, label string, offer string) (*rtpUpCon
 
 		track := &rtpUpTrack{
 			track:      remote,
+			receiver:   receiver,
 			conn:       up,
 			cache:      packetcache.New(minPacketCache(remote)),
 			rate:       estimator.New(time.Second),
@@ -641,7 +686,7 @@ func newUpConn(c group.Client, id string, label string, offer string) (*rtpUpCon
 
 		go readLoop(track)
 
-		go rtcpUpListener(up, track, receiver)
+		go rtcpUpListener(track)
 
 		up.mu.Unlock()
 
@@ -768,12 +813,12 @@ func (track *rtpUpTrack) GetPacket(seqno uint16, result []byte, nack bool) uint1
 	return 0
 }
 
-func rtcpUpListener(conn *rtpUpConnection, track *rtpUpTrack, r *webrtc.RTPReceiver) {
+func rtcpUpListener(track *rtpUpTrack) {
 	buf := make([]byte, 1500)
 
 	for {
 		firstSR := false
-		n, _, err := r.ReadSimulcast(buf, track.track.RID())
+		n, _, err := track.receiver.ReadSimulcast(buf, track.track.RID())
 		if err != nil {
 			if err != io.EOF && err != io.ErrClosedPipe {
 				log.Printf("Read RTCP: %v", err)
@@ -824,7 +869,7 @@ func rtcpUpListener(conn *rtpUpConnection, track *rtpUpTrack, r *webrtc.RTPRecei
 		if firstSR {
 			// this is the first SR we got for at least one track,
 			// quickly propagate the time offsets downstream
-			local := conn.getLocal()
+			local := track.conn.getLocal()
 			for _, l := range local {
 				l, ok := l.(*rtpDownConnection)
 				if ok {
@@ -836,6 +881,49 @@ func rtcpUpListener(conn *rtpUpConnection, track *rtpUpTrack, r *webrtc.RTPRecei
 			}
 		}
 	}
+}
+
+func maxUpBitrate(t *rtpUpTrack) uint64 {
+	minrate := ^uint64(0)
+	maxrate := uint64(group.MinBitrate)
+	maxsid := 0
+	maxtid := 0
+	local := t.getLocal()
+	for _, down := range local {
+		r, sid, tid := down.GetMaxBitrate()
+		if maxsid < sid {
+			maxsid = sid
+		}
+		if maxtid < tid {
+			maxtid = tid
+		}
+		if r < group.MinBitrate {
+			r = group.MinBitrate
+		}
+		if minrate > r {
+			minrate = r
+		}
+		if maxrate < r {
+			maxrate = r
+		}
+	}
+	// assume that lower spatial layers take up 1/5 of
+	// the throughput
+	if maxsid > 0 {
+		maxrate = maxrate * 5 / 4
+	}
+	// assume that each layer takes two times less
+	// throughput than the higher one.  Then we've
+	// got enough slack for a factor of 2^(layers-1).
+	for i := 0; i < maxtid; i++ {
+		if minrate < ^uint64(0)/2 {
+			minrate *= 2
+		}
+	}
+	if minrate < maxrate {
+		return minrate
+	}
+	return maxrate
 }
 
 func sendUpRTCP(up *rtpUpConnection) error {
@@ -908,47 +996,7 @@ func sendUpRTCP(up *rtpUpConnection) error {
 		} else if t.Label() == "l" {
 			rate += group.LowBitrate
 		} else {
-			minrate := ^uint64(0)
-			maxrate := uint64(group.MinBitrate)
-			maxsid := 0
-			maxtid := 0
-			local := t.getLocal()
-			for _, down := range local {
-				r, sid, tid := down.GetMaxBitrate()
-				if maxsid < sid {
-					maxsid = sid
-				}
-				if maxtid < tid {
-					maxtid = tid
-				}
-				if r < group.MinBitrate {
-					r = group.MinBitrate
-				}
-				if minrate > r {
-					minrate = r
-				}
-				if maxrate < r {
-					maxrate = r
-				}
-			}
-			// assume that lower spatial layers take up 1/5 of
-			// the throughput
-			if maxsid > 0 {
-				maxrate = maxrate * 5 / 4
-			}
-			// assume that each layer takes two times less
-			// throughput than the higher one.  Then we've
-			// got enough slack for a factor of 2^(layers-1).
-			for i := 0; i < maxtid; i++ {
-				if minrate < ^uint64(0)/2 {
-					minrate *= 2
-				}
-			}
-			if minrate < maxrate {
-				rate += minrate
-			} else {
-				rate += maxrate
-			}
+			rate += maxUpBitrate(t)
 		}
 	}
 
@@ -1092,13 +1140,13 @@ func (track *rtpDownTrack) updateRate(loss uint8, now uint64) {
 	track.maxBitrate.Set(rate, now)
 }
 
-func rtcpDownListener(track *rtpDownTrack, s *webrtc.RTPSender) {
+func rtcpDownListener(track *rtpDownTrack) {
 	lastFirSeqno := uint8(0)
 
 	buf := make([]byte, 1500)
 
 	for {
-		n, _, err := s.Read(buf)
+		n, _, err := track.sender.Read(buf)
 		if err != nil {
 			if err != io.EOF && err != io.ErrClosedPipe {
 				log.Printf("Read RTCP: %v", err)

@@ -107,10 +107,6 @@ func (c *webClient) SetPermissions(perms group.ClientPermissions) {
 	c.permissions = perms
 }
 
-func (c *webClient) OverridePermissions(g *group.Group) bool {
-	return false
-}
-
 func (c *webClient) PushClient(group, kind, id, username string, permissions group.ClientPermissions, status map[string]interface{}) error {
 	return c.action(pushClientAction{
 		group, kind, id, username, permissions, status,
@@ -349,7 +345,7 @@ func delDownConnHelper(c *webClient, id string) *rtpDownConnection {
 
 var errUnexpectedTrackType = errors.New("unexpected track type, this shouldn't happen")
 
-func addDownTrackUnlocked(conn *rtpDownConnection, remoteTrack *rtpUpTrack, remoteConn conn.Up) error {
+func addDownTrackUnlocked(conn *rtpDownConnection, remoteTrack *rtpUpTrack) error {
 	for _, t := range conn.tracks {
 		tt, ok := t.remote.(*rtpUpTrack)
 		if !ok {
@@ -371,7 +367,7 @@ func addDownTrackUnlocked(conn *rtpDownConnection, remoteTrack *rtpUpTrack, remo
 	msid := remoteTrack.track.StreamID()
 	if msid == "" {
 		log.Println("Got track with empty msid")
-		msid = remoteConn.Label()
+		msid = remoteTrack.conn.Label()
 	}
 	if msid == "" {
 		msid = "dummy"
@@ -384,19 +380,43 @@ func addDownTrackUnlocked(conn *rtpDownConnection, remoteTrack *rtpUpTrack, remo
 		return err
 	}
 
-	sender, err := conn.pc.AddTrack(local)
+	transceiver, err := conn.pc.AddTransceiverFromTrack(local,
+		webrtc.RTPTransceiverInit{
+			Direction: webrtc.RTPTransceiverDirectionSendonly,
+		},
+	)
 	if err != nil {
 		return err
 	}
 
-	parms := sender.GetParameters()
+	codec := local.Codec()
+	ptype, err := group.CodecPayloadType(local.Codec())
+	if err != nil {
+		log.Printf("Couldn't determine ptype for codec %v: %v",
+			codec.MimeType, err)
+	} else {
+		err := transceiver.SetCodecPreferences(
+			[]webrtc.RTPCodecParameters{
+				{
+					RTPCodecCapability: codec,
+					PayloadType:        ptype,
+				},
+			},
+		)
+		if err != nil {
+			log.Printf("Couldn't set ptype for codec %v: %v",
+				codec.MimeType, err)
+		}
+	}
+
+	parms := transceiver.Sender().GetParameters()
 	if len(parms.Encodings) != 1 {
 		return errors.New("got multiple encodings")
 	}
 
 	track := &rtpDownTrack{
 		track:          local,
-		sender:         sender,
+		sender:         transceiver.Sender(),
 		ssrc:           parms.Encodings[0].SSRC,
 		conn:           conn,
 		remote:         remoteTrack,
@@ -409,7 +429,7 @@ func addDownTrackUnlocked(conn *rtpDownConnection, remoteTrack *rtpUpTrack, remo
 
 	conn.tracks = append(conn.tracks, track)
 
-	go rtcpDownListener(track, sender)
+	go rtcpDownListener(track)
 
 	return nil
 }
@@ -426,7 +446,7 @@ func delDownTrackUnlocked(conn *rtpDownConnection, track *rtpDownTrack) error {
 	return os.ErrNotExist
 }
 
-func replaceTracks(conn *rtpDownConnection, remote []conn.UpTrack, remoteConn conn.Up) (bool, error) {
+func replaceTracks(conn *rtpDownConnection, remote []conn.UpTrack, limitSid bool) (bool, error) {
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 
@@ -469,6 +489,17 @@ outer2:
 		del = append(del, track)
 	}
 
+	defer func() {
+		for _, t := range conn.tracks {
+			layer := t.getLayerInfo()
+			layer.limitSid = limitSid
+			if limitSid {
+				layer.wantedSid = 0
+			}
+			t.setLayerInfo(layer)
+		}
+	}()
+
 	if len(del) == 0 && len(add) == 0 {
 		return false, nil
 	}
@@ -481,7 +512,7 @@ outer2:
 	}
 
 	for _, rt := range add {
-		err := addDownTrackUnlocked(conn, rt, remoteConn)
+		err := addDownTrackUnlocked(conn, rt)
 		if err != nil {
 			return false, err
 		}
@@ -598,15 +629,6 @@ func gotAnswer(c *webClient, id string, sdp string) error {
 		return err
 	}
 
-	for _, t := range down.tracks {
-		local := t.track.Codec()
-		remote := t.remote.Codec()
-		if local.MimeType != remote.MimeType ||
-			local.ClockRate != remote.ClockRate {
-			return errors.New("negotiation failed")
-		}
-	}
-
 	err = down.flushICECandidates()
 	if err != nil {
 		log.Printf("ICE: %v", err)
@@ -718,7 +740,7 @@ func requestConns(target group.Client, g *group.Group, id string) {
 	}
 }
 
-func requestedTracks(c *webClient, override []string, up conn.Up, tracks []conn.UpTrack) []conn.UpTrack {
+func requestedTracks(c *webClient, override []string, up conn.Up, tracks []conn.UpTrack) ([]conn.UpTrack, bool) {
 	r := override
 	if r == nil {
 		var ok bool
@@ -727,7 +749,7 @@ func requestedTracks(c *webClient, override []string, up conn.Up, tracks []conn.
 			r, ok = c.requested[""]
 		}
 		if !ok || len(r) == 0 {
-			return nil
+			return nil, false
 		}
 	}
 
@@ -766,6 +788,7 @@ func requestedTracks(c *webClient, override []string, up conn.Up, tracks []conn.
 	}
 
 	var ts []conn.UpTrack
+	limitSid := false
 	if audio {
 		t := find(webrtc.RTPCodecTypeAudio)
 		if t != nil {
@@ -785,10 +808,13 @@ func requestedTracks(c *webClient, override []string, up conn.Up, tracks []conn.
 		)
 		if t != nil {
 			ts = append(ts, t)
+			if t.Label() != "l" {
+				limitSid = true
+			}
 		}
 	}
 
-	return ts
+	return ts, limitSid
 }
 
 func (c *webClient) PushConn(g *group.Group, id string, up conn.Up, tracks []conn.UpTrack, replace string) error {
@@ -801,8 +827,12 @@ func (c *webClient) PushConn(g *group.Group, id string, up conn.Up, tracks []con
 
 func getGroupStatus(g *group.Group) map[string]interface{} {
 	status := make(map[string]interface{})
-	if locked, _ := g.Locked(); locked {
-		status["locked"] = true
+	if locked, message := g.Locked(); locked {
+		if message == "" {
+			status["locked"] = true
+		} else {
+			status["locked"] = message
+		}
 	}
 	if dn := g.DisplayName(); dn != "" {
 		status["displayName"] = dn
@@ -976,6 +1006,7 @@ func clientLoop(c *webClient, ws *websocket.Conn) error {
 
 func pushDownConn(c *webClient, id string, up conn.Up, tracks []conn.UpTrack, replace string) error {
 	var requested []conn.UpTrack
+	limitSid := false
 	if up != nil {
 		var old *rtpDownConnection
 		if replace != "" {
@@ -987,7 +1018,7 @@ func pushDownConn(c *webClient, id string, up conn.Up, tracks []conn.UpTrack, re
 		if old != nil {
 			override = old.requested
 		}
-		requested = requestedTracks(c, override, up, tracks)
+		requested, limitSid = requestedTracks(c, override, up, tracks)
 	}
 
 	if replace != "" {
@@ -1016,14 +1047,14 @@ func pushDownConn(c *webClient, id string, up conn.Up, tracks []conn.UpTrack, re
 		}
 		return err
 	}
-	done, err := replaceTracks(down, requested, up)
+	done, err := replaceTracks(down, requested, limitSid)
 	if err != nil || !done {
 		return err
 	}
 	err = negotiate(c, down, false, replace)
 	if err != nil {
 		log.Printf("Negotiation failed: %v", err)
-		closeDownConn(c, down.id, "negotiation failed")
+		closeDownConn(c, down.id, err.Error())
 		return err
 	}
 	replace = ""
@@ -1351,7 +1382,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		h := c.group.GetChatHistory()
 		for _, m := range h {
 			err := c.write(clientMessage{
-				Type:     "chat",
+				Type:     "chathistory",
 				Id:       m.Id,
 				Username: m.User,
 				Time:     m.Time,
@@ -1395,7 +1426,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		err := gotOffer(c, m.Id, m.Label, m.SDP, m.Replace)
 		if err != nil {
 			log.Printf("gotOffer: %v", err)
-			return failUpConnection(c, m.Id, "negotiation failed")
+			return failUpConnection(c, m.Id, err.Error())
 		}
 	case "answer":
 		if m.Id == "" {
@@ -1406,7 +1437,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 			log.Printf("gotAnswer: %v", err)
 			message := ""
 			if err != ErrUnknownId {
-				message = "negotiation failed"
+				message = err.Error()
 			}
 			return closeDownConn(c, m.Id, message)
 		}
@@ -1421,9 +1452,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 				"",
 			)
 			if err != nil {
-				return closeDownConn(
-					c, m.Id, "negotiation failed",
-				)
+				return closeDownConn(c, m.Id, err.Error())
 			}
 		}
 	case "renegotiate":
@@ -1434,9 +1463,7 @@ func handleClientMessage(c *webClient, m clientMessage) error {
 		if down != nil {
 			err := negotiate(c, down, true, "")
 			if err != nil {
-				return closeDownConn(
-					c, m.Id, "renegotiation failed",
-				)
+				return closeDownConn(c, m.Id, err.Error())
 			}
 		} else {
 			log.Printf("Trying to renegotiate unknown connection")
@@ -1819,7 +1846,7 @@ func errorMessage(id string, err error) *clientMessage {
 		}
 		return &clientMessage{
 			Type:       "usermessage",
-			Kind:       "error",
+			Kind:       "kicked",
 			Id:         e.Id,
 			Username:   e.Username,
 			Dest:       id,

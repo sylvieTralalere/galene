@@ -22,6 +22,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/jech/cert"
 	"github.com/jech/galene/diskwriter"
 	"github.com/jech/galene/group"
 	"github.com/jech/galene/rtpconn"
@@ -58,9 +59,13 @@ func Serve(address string, dataDir string) error {
 		IdleTimeout:       120 * time.Second,
 	}
 	if !Insecure {
+		certificate := cert.New(
+			filepath.Join(dataDir, "cert.pem"),
+			filepath.Join(dataDir, "key.pem"),
+		)
 		s.TLSConfig = &tls.Config{
 			GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return getCertificate(dataDir)
+				return certificate.Get()
 			},
 		}
 	}
@@ -117,6 +122,7 @@ func httpError(w http.ResponseWriter, err error) {
 		http.Error(w, "403 forbidden", http.StatusForbidden)
 		return
 	}
+	log.Printf("HTTP server error: %v", err)
 	http.Error(w, "500 Internal Server Error",
 		http.StatusInternalServerError)
 	return
@@ -200,6 +206,7 @@ func (fh *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		index := path.Join(p, "index.html")
 		ff, err := fh.root.Open(index)
 		if err != nil {
+			// return 403 if index.html doesn't exist
 			if os.IsNotExist(err) {
 				err = os.ErrPermission
 			}
@@ -253,7 +260,7 @@ func parseGroupName(prefix string, p string) string {
 		return ""
 	}
 
-	name := p[len("/group/"):]
+	name := p[len(prefix):]
 	if name == "" {
 		return ""
 	}
@@ -280,8 +287,7 @@ func groupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Path != "/group/"+name {
-		http.Redirect(w, r, "/group/"+name,
-			http.StatusPermanentRedirect)
+		http.Redirect(w, r, "/group/"+name, http.StatusPermanentRedirect)
 		return
 	}
 
@@ -298,8 +304,7 @@ func groupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if redirect := g.Redirect(); redirect != "" {
-		http.Redirect(w, r, redirect,
-			http.StatusPermanentRedirect)
+		http.Redirect(w, r, redirect, http.StatusPermanentRedirect)
 		return
 	}
 
@@ -414,12 +419,12 @@ func recordingsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	p = path.Clean(p)
+
 	if p == "/" {
 		http.Error(w, "nothing to see", http.StatusForbidden)
 		return
 	}
-
-	p = path.Clean(p)
 
 	f, err := os.Open(filepath.Join(diskwriter.Directory, p))
 	if err != nil {
@@ -556,6 +561,7 @@ func checkGroupPermissions(w http.ResponseWriter, r *http.Request, groupname str
 }
 
 func serveGroupRecordings(w http.ResponseWriter, r *http.Request, f *os.File, group string) {
+	// read early, so we return permission errors to HEAD
 	fis, err := f.Readdir(-1)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)

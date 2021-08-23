@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/at-wat/ebml-go/mkvcore"
 	"github.com/at-wat/ebml-go/webm"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/jech/samplebuilder"
 
+	gcodecs "github.com/jech/galene/codecs"
 	"github.com/jech/galene/conn"
 	"github.com/jech/galene/group"
 )
@@ -61,16 +63,14 @@ func (client *Client) Challenge(group string, cred group.ClientCredentials) bool
 	return true
 }
 
-func (client *Client) OverridePermissions(g *group.Group) bool {
-	return true
-}
-
 func (client *Client) SetPermissions(perms group.ClientPermissions) {
 	return
 }
 
 func (client *Client) Permissions() group.ClientPermissions {
-	return group.ClientPermissions{}
+	return group.ClientPermissions{
+		System: true,
+	}
 }
 
 func (client *Client) Status() map[string]interface{} {
@@ -186,7 +186,7 @@ func (conn *diskConn) warn(message string) {
 }
 
 // called locked
-func (conn *diskConn) reopen() error {
+func (conn *diskConn) reopen(extension string) error {
 	for _, t := range conn.tracks {
 		if t.writer != nil {
 			t.writeBuffered(true)
@@ -196,7 +196,7 @@ func (conn *diskConn) reopen() error {
 	}
 	conn.file = nil
 
-	file, err := openDiskFile(conn.directory, conn.username)
+	file, err := openDiskFile(conn.directory, conn.username, extension)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func (conn *diskConn) Close() error {
 	return nil
 }
 
-func openDiskFile(directory, username string) (*os.File, error) {
+func openDiskFile(directory, username, extension string) (*os.File, error) {
 	filenameFormat := "2006-01-02T15:04:05.000"
 	if runtime.GOOS == "windows" {
 		filenameFormat = "2006-01-02T15-04-05-000"
@@ -239,9 +239,11 @@ func openDiskFile(directory, username string) (*os.File, error) {
 	for counter := 0; counter < 100; counter++ {
 		var fn string
 		if counter == 0 {
-			fn = fmt.Sprintf("%v.webm", filename)
+			fn = fmt.Sprintf("%v.%v", filename, extension)
 		} else {
-			fn = fmt.Sprintf("%v-%02d.webm", filename, counter)
+			fn = fmt.Sprintf("%v-%02d.%v",
+				filename, counter, extension,
+			)
 		}
 
 		fn = filepath.Join(directory, fn)
@@ -277,7 +279,7 @@ type diskTrack struct {
 	remote conn.UpTrack
 	conn   *diskConn
 
-	writer    webm.BlockWriteCloser
+	writer    mkvcore.BlockWriteCloser
 	builder   *samplebuilder.SampleBuilder
 	lastSeqno maybeUint32
 	origin    maybeUint32
@@ -299,7 +301,8 @@ func newDiskConn(client *Client, directory string, up conn.Up, remoteTracks []co
 				client.group.WallOps("Multiple audio tracks, recording just one")
 			}
 		} else if strings.EqualFold(codec, "video/vp8") ||
-			strings.EqualFold(codec, "video/vp9") {
+			strings.EqualFold(codec, "video/vp9") ||
+			strings.EqualFold(codec, "video/h264") {
 			if video == nil || video.Label() == "l" {
 				video = remote
 			} else if remote.Label() != "l" {
@@ -374,6 +377,17 @@ func newDiskConn(client *Client, directory string, up conn.Up, remoteTracks []co
 				),
 			)
 			conn.hasVideo = true
+		} else if strings.EqualFold(codec.MimeType, "video/h264") {
+			builder = samplebuilder.New(
+				128, &codecs.H264Packet{}, codec.ClockRate,
+				samplebuilder.WithPartitionHeadChecker(
+					&codecs.H264PartitionHeadChecker{},
+				),
+				samplebuilder.WithPartitionTailChecker(
+					markerPartitionTailChecker,
+				),
+			)
+			conn.hasVideo = true
 		} else {
 			// this shouldn't happen
 			return nil, errors.New(
@@ -409,70 +423,6 @@ func (t *diskTrack) SetTimeOffset(ntp uint64, rtp uint32) {
 }
 
 func (t *diskTrack) SetCname(string) {
-}
-
-func isKeyframe(codec string, data []byte) bool {
-	if strings.EqualFold(codec, "video/vp8") {
-		if len(data) < 1 {
-			return false
-		}
-		return (data[0] & 0x1) == 0
-	} else if strings.EqualFold(codec, "video/vp9") {
-		if len(data) < 1 {
-			return false
-		}
-		if data[0]&0xC0 != 0x80 {
-			return false
-		}
-		profile := (data[0] >> 4) & 0x3
-		if profile != 3 {
-			return (data[0] & 0xC) == 0
-		}
-		return (data[0] & 0x6) == 0
-	} else {
-		panic("Eek!")
-	}
-}
-
-func keyframeDimensions(codec string, data []byte, packet *rtp.Packet) (uint32, uint32) {
-	if strings.EqualFold(codec, "video/vp8") {
-		if len(data) < 10 {
-			return 0, 0
-		}
-		raw := uint32(data[6]) | uint32(data[7])<<8 |
-			uint32(data[8])<<16 | uint32(data[9])<<24
-		width := raw & 0x3FFF
-		height := (raw >> 16) & 0x3FFF
-		return width, height
-	} else if strings.EqualFold(codec, "video/vp9") {
-		if packet == nil {
-			return 0, 0
-		}
-		var vp9 codecs.VP9Packet
-		_, err := vp9.Unmarshal(packet.Payload)
-		if err != nil {
-			return 0, 0
-		}
-		if !vp9.V {
-			return 0, 0
-		}
-		w := uint32(0)
-		h := uint32(0)
-		for i := range vp9.Width {
-			if i >= len(vp9.Height) {
-				break
-			}
-			if w < uint32(vp9.Width[i]) {
-				w = uint32(vp9.Width[i])
-			}
-			if h < uint32(vp9.Height[i]) {
-				h = uint32(vp9.Height[i])
-			}
-		}
-		return w, h
-	} else {
-		return 0, 0
-	}
 }
 
 func (t *diskTrack) Write(buf []byte) (int, error) {
@@ -527,21 +477,11 @@ func (t *diskTrack) Write(buf []byte) (int, error) {
 // writeRTP writes the packet without doing any loss recovery.
 // Called locked.
 func (t *diskTrack) writeRTP(p *rtp.Packet) error {
-	codec := t.remote.Codec()
-	if strings.EqualFold(codec.MimeType, "video/vp9") {
-		var vp9 codecs.VP9Packet
-		_, err := vp9.Unmarshal(p.Payload)
-		if err == nil && vp9.B && len(vp9.Payload) >= 1 {
-			profile := (vp9.Payload[0] >> 4) & 0x3
-			kf := false
-			if profile != 3 {
-				kf = (vp9.Payload[0] & 0xC) == 0
-			} else {
-				kf = (vp9.Payload[0] & 0x6) == 0
-			}
-			if kf {
-				t.savedKf = p
-			}
+	codec := t.remote.Codec().MimeType
+	if len(codec) > 6 && strings.EqualFold(codec[:6], "video/") {
+		kf, _ := gcodecs.Keyframe(codec, p)
+		if kf {
+			t.savedKf = p
 		}
 	}
 
@@ -554,7 +494,7 @@ func (t *diskTrack) writeRTP(p *rtp.Packet) error {
 // then samples will be flushed even if they are preceded by incomplete
 // samples.
 func (t *diskTrack) writeBuffered(force bool) error {
-	codec := t.remote.Codec()
+	codec := t.remote.Codec().MimeType
 
 	for {
 		var sample *media.Sample
@@ -568,16 +508,18 @@ func (t *diskTrack) writeBuffered(force bool) error {
 			return nil
 		}
 
-		keyframe := true
+		var keyframe bool
+		if len(codec) > 6 && strings.EqualFold(codec[:6], "video/") {
+			if t.savedKf == nil {
+				keyframe = false
+			} else {
+				keyframe = (ts == t.savedKf.Timestamp)
+			}
 
-		if strings.EqualFold(codec.MimeType, "video/vp8") ||
-			strings.EqualFold(codec.MimeType, "video/vp9") {
-			keyframe = isKeyframe(codec.MimeType, sample.Data)
 			if keyframe {
 				err := t.conn.initWriter(
-					keyframeDimensions(
-						codec.MimeType, sample.Data,
-						t.savedKf,
+					gcodecs.KeyframeDimensions(
+						codec, t.savedKf,
 					),
 				)
 				if err != nil {
@@ -588,6 +530,7 @@ func (t *diskTrack) writeBuffered(force bool) error {
 				}
 			}
 		} else {
+			keyframe = true
 			if t.writer == nil {
 				if !t.conn.hasVideo {
 					err := t.conn.initWriter(0, 0)
@@ -635,7 +578,8 @@ func (conn *diskConn) initWriter(width, height uint32) error {
 	if conn.file != nil && width == conn.width && height == conn.height {
 		return nil
 	}
-	var entries []webm.TrackEntry
+	isWebm := true
+	var desc []mkvcore.TrackDescription
 	for i, t := range conn.tracks {
 		var entry webm.TrackEntry
 		codec := t.remote.Codec()
@@ -672,25 +616,56 @@ func (conn *diskConn) initWriter(width, height uint32) error {
 					PixelHeight: uint64(height),
 				},
 			}
+		} else if strings.EqualFold(codec.MimeType, "video/h264") {
+			entry = webm.TrackEntry{
+				Name:        "Video",
+				TrackNumber: uint64(i + 1),
+				CodecID:     "V_MPEG4/ISO/AVC",
+				TrackType:   1,
+				Video: &webm.Video{
+					PixelWidth:  uint64(width),
+					PixelHeight: uint64(height),
+				},
+			}
+			isWebm = false
 		} else {
 			return errors.New("unknown track type")
 		}
-		entries = append(entries, entry)
+		desc = append(desc,
+			mkvcore.TrackDescription{
+				TrackNumber: uint64(i + 1),
+				TrackEntry:  entry,
+			},
+		)
 	}
 
-	err := conn.reopen()
+	extension := "webm"
+	header := webm.DefaultEBMLHeader
+	if !isWebm {
+		extension = "mkv"
+		h := *header
+		h.DocType = "matroska"
+		header = &h
+	}
+
+	err := conn.reopen(extension)
 	if err != nil {
 		return err
 	}
 
-	writers, err := webm.NewSimpleBlockWriter(conn.file, entries)
+	ws, err := mkvcore.NewSimpleBlockWriter(
+		conn.file, desc,
+		mkvcore.WithEBMLHeader(header),
+		mkvcore.WithSegmentInfo(webm.DefaultSegmentInfo),
+		mkvcore.WithBlockInterceptor(webm.DefaultBlockInterceptor),
+	)
 	if err != nil {
 		conn.file.Close()
 		conn.file = nil
 		return err
 	}
 
-	if len(writers) != len(conn.tracks) {
+	if len(ws) != len(conn.tracks) {
 		conn.file.Close()
 		conn.file = nil
 		return errors.New("unexpected number of writers")
@@ -700,7 +675,7 @@ func (conn *diskConn) initWriter(width, height uint32) error {
 	conn.height = height
 
 	for i, t := range conn.tracks {
-		t.writer = writers[i]
+		t.writer = ws[i]
 	}
 	return nil
 }

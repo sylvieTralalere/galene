@@ -2505,7 +2505,7 @@ async function gotJoined(kind, group, perms, status, message) {
         } else {
             /*
             displayMessage(
-                "Press Ready to enable your camera or microphone"
+                "Press Enable to enable your camera or microphone"
             ); // disabled for Tralalere
             */
         }
@@ -2526,6 +2526,7 @@ function gotUserMessage(id, dest, username, time, privileged, kind, message) {
     let userv = document.getElementById('user-v-' + id);
 
     switch(kind) {
+    case 'kicked':
     case 'error':
     case 'warning':
     case 'info':
@@ -2875,8 +2876,11 @@ let lastMessage = {};
 
 /**
  * @param {string} peerId
+ * @param {string} dest
  * @param {string} nick
  * @param {number} time
+ * @param {boolean} privileged
+ * @param {boolean} history
  * @param {string} kind
  * @param {unknown} message
  */
@@ -2891,7 +2895,7 @@ function addToChatbox(peerId, dest, nick, time, privileged, kind, message) {
     footer.classList.add('message-footer');
     if(!peerId)
         container.classList.add('message-system');
-    if(userpass.username === nick)
+    if(peerId === serverConnection.id)
         container.classList.add('message-sender');
     if(dest)
         container.classList.add('message-private');
@@ -2978,7 +2982,7 @@ function addToChatbox(peerId, dest, nick, time, privileged, kind, message) {
  * @param {string} message
  */
 function localMessage(message) {
-    return addToChatbox(null, null, null, Date.now(), false, null, message);
+    return addToChatbox(null, null, null, Date.now(), false, false, '', message);
 }
 
 function clearChat() {
@@ -3033,11 +3037,7 @@ commands.help = {
                 continue;
             cs.push(`/${cmd}${c.parameters?' ' + c.parameters:''}: ${c.description}`);
         }
-        cs.sort();
-        let s = '';
-        for(let i = 0; i < cs.length; i++)
-            s = s + cs[i] + '\n';
-        localMessage(s);
+        localMessage(cs.sort().join('\n'));
     }
 };
 
@@ -3213,7 +3213,7 @@ commands.msg = {
             throw new Error(`Unknown user ${p[0]}`);
         serverConnection.chat('', id, p[1]);
         addToChatbox(serverConnection.id, id, serverConnection.username,
-                     Date.now(), false, '', p[1]);
+                     Date.now(), false, false, '', p[1]);
     }
 };
 
@@ -3435,6 +3435,7 @@ function handleInput() {
                 try {
                     c.f(cmd, rest);
                 } catch(e) {
+                    console.error(e);
                     displayError(e);
                 }
                 return;
@@ -3539,7 +3540,6 @@ document.getElementById('resizer').addEventListener('mousedown', chatResizer, fa
 function displayError(message, level) {
     if(!level)
         level = "error";
-
     var background = 'linear-gradient(to right, #e20a0a, #df2d2d)';
     var position = 'center';
     var gravity = 'top';
@@ -3552,6 +3552,9 @@ function displayError(message, level) {
         break;
     case "warning":
         background = "linear-gradient(to right, #bdc511, #c2cf01)";
+        break;
+    case "kicked":
+        level = "error";
         break;
     }
 

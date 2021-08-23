@@ -129,6 +129,15 @@ func (g *Group) DisplayName() string {
 	return g.description.DisplayName
 }
 
+func (g *Group) EmptyTime() time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.clients) > 0 {
+		return 0
+	}
+	return time.Since(g.timestamp)
+}
+
 var groups struct {
 	mu     sync.Mutex
 	groups map[string]*Group
@@ -142,71 +151,49 @@ func (g *Group) API() (*webrtc.API, error) {
 	return APIFromNames(codecs)
 }
 
-func codecFromName(name string) (webrtc.RTPCodecCapability, error) {
-	switch name {
-	case "vp8":
-		return webrtc.RTPCodecCapability{
-			"video/VP8", 90000, 0,
-			"",
-			nil,
-		}, nil
-	case "vp9":
-		return webrtc.RTPCodecCapability{
-			"video/VP9", 90000, 0,
-			"profile-id=0",
-			nil,
-		}, nil
-	case "av1":
-		return webrtc.RTPCodecCapability{
-			"video/AV1X", 90000, 0,
-			"",
-			nil,
-		}, nil
-	case "h264":
-		return webrtc.RTPCodecCapability{
-			"video/H264", 90000, 0,
-			"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
-			nil,
-		}, nil
-	case "opus":
-		return webrtc.RTPCodecCapability{
-			"audio/opus", 48000, 2,
-			"minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1",
-			nil,
-		}, nil
-	case "g722":
-		return webrtc.RTPCodecCapability{
-			"audio/G722", 8000, 1,
-			"",
-			nil,
-		}, nil
-	case "pcmu":
-		return webrtc.RTPCodecCapability{
-			"audio/PCMU", 8000, 1,
-			"",
-			nil,
-		}, nil
-	case "pcma":
-		return webrtc.RTPCodecCapability{
-			"audio/PCMA", 8000, 1,
-			"",
-			nil,
-		}, nil
-	default:
-		return webrtc.RTPCodecCapability{}, errors.New("unknown codec")
+func fmtpValue(fmtp, key string) string {
+	fields := strings.Split(fmtp, ";")
+	for _, f := range fields {
+		kv := strings.SplitN(f, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		if kv[0] == key {
+			return kv[1]
+		}
 	}
+	return ""
 }
 
-func payloadType(codec webrtc.RTPCodecCapability) (webrtc.PayloadType, error) {
+func CodecPayloadType(codec webrtc.RTPCodecCapability) (webrtc.PayloadType, error) {
 	switch strings.ToLower(codec.MimeType) {
 	case "video/vp8":
 		return 96, nil
 	case "video/vp9":
-		return 98, nil
+		profile := fmtpValue(codec.SDPFmtpLine, "profile-id")
+		switch profile {
+		case "0":
+			return 98, nil
+		case "2":
+			return 100, nil
+		default:
+			return 0, errors.New("unknown VP9 profile")
+		}
 	case "video/av1x":
-		return 104, nil
+		return 35, nil
 	case "video/h264":
-		return 102, nil
+		profile := fmtpValue(codec.SDPFmtpLine, "profile-level-id")
+		if len(profile) < 4 {
+			return 0, errors.New("malforned H.264 profile")
+		}
+		switch strings.ToLower(profile[:4]) {
+		case "4200":
+			return 102, nil
+		case "42e0":
+			return 108, nil
+		default:
+			return 0, errors.New("unknown H.264 profile")
+		}
 	case "audio/opus":
 		return 111, nil
 	case "audio/g722":
@@ -220,7 +207,112 @@ func payloadType(codec webrtc.RTPCodecCapability) (webrtc.PayloadType, error) {
 	}
 }
 
-func APIFromCodecs(codecs []webrtc.RTPCodecCapability) (*webrtc.API, error) {
+func codecsFromName(name string) ([]webrtc.RTPCodecParameters, error) {
+	fb := []webrtc.RTCPFeedback{
+		{"goog-remb", ""},
+		{"nack", ""},
+		{"nack", "pli"},
+		{"ccm", "fir"},
+	}
+
+	var codecs []webrtc.RTPCodecCapability
+
+	switch name {
+	case "vp8":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/VP8", 90000, 0,
+				"",
+				fb,
+			},
+		}
+	case "vp9":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/VP9", 90000, 0,
+				"profile-id=0",
+				fb,
+			},
+			{
+				"video/VP9", 90000, 0,
+				"profile-id=2",
+				fb,
+			},
+		}
+	case "av1":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/AV1X", 90000, 0,
+				"",
+				fb,
+			},
+		}
+	case "h264":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"video/H264", 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+				fb,
+			},
+			{
+				"video/H264", 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+				fb,
+			},
+		}
+	case "opus":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/opus", 48000, 2,
+				"minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1",
+				nil,
+			},
+		}
+	case "g722":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/G722", 8000, 1,
+				"",
+				nil,
+			},
+		}
+	case "pcmu":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/PCMU", 8000, 1,
+				"",
+				nil,
+			},
+		}
+	case "pcma":
+		codecs = []webrtc.RTPCodecCapability{
+			{
+				"audio/PCMU", 8000, 1,
+				"",
+				nil,
+			},
+		}
+	default:
+		return nil, errors.New("unknown codec")
+	}
+
+	parms := make([]webrtc.RTPCodecParameters, 0, len(codecs))
+	for _, c := range codecs {
+		ptype, err := CodecPayloadType(c)
+		if err != nil {
+			log.Printf("Couldn't determine ptype for codec %v: %v",
+				c.MimeType, err)
+			continue
+		}
+		parms = append(parms, webrtc.RTPCodecParameters{
+			RTPCodecCapability: c,
+			PayloadType:        ptype,
+		})
+	}
+	return parms, nil
+}
+
+func APIFromCodecs(codecs []webrtc.RTPCodecParameters) (*webrtc.API, error) {
 	s := webrtc.SettingEngine{}
 	s.SetSRTPReplayProtectionWindow(512)
 	if !UseMDNS {
@@ -229,41 +321,11 @@ func APIFromCodecs(codecs []webrtc.RTPCodecCapability) (*webrtc.API, error) {
 	m := webrtc.MediaEngine{}
 
 	for _, codec := range codecs {
-		var tpe webrtc.RTPCodecType
-		var fb []webrtc.RTCPFeedback
-		if strings.HasPrefix(strings.ToLower(codec.MimeType), "video/") {
-			tpe = webrtc.RTPCodecTypeVideo
-			fb = []webrtc.RTCPFeedback{
-				{"goog-remb", ""},
-				{"nack", ""},
-				{"nack", "pli"},
-				{"ccm", "fir"},
-			}
-		} else if strings.HasPrefix(strings.ToLower(codec.MimeType), "audio/") {
+		tpe := webrtc.RTPCodecTypeVideo
+		if strings.HasPrefix(strings.ToLower(codec.MimeType), "audio/") {
 			tpe = webrtc.RTPCodecTypeAudio
-			fb = []webrtc.RTCPFeedback{}
-		} else {
-			continue
 		}
-
-		ptpe, err := payloadType(codec)
-		if err != nil {
-			log.Printf("%v", err)
-			continue
-		}
-		err = m.RegisterCodec(
-			webrtc.RTPCodecParameters{
-				RTPCodecCapability: webrtc.RTPCodecCapability{
-					MimeType:     codec.MimeType,
-					ClockRate:    codec.ClockRate,
-					Channels:     codec.Channels,
-					SDPFmtpLine:  codec.SDPFmtpLine,
-					RTCPFeedback: fb,
-				},
-				PayloadType: ptpe,
-			},
-			tpe,
-		)
+		err := m.RegisterCodec(codec, tpe)
 		if err != nil {
 			log.Printf("%v", err)
 			continue
@@ -290,14 +352,14 @@ func APIFromNames(names []string) (*webrtc.API, error) {
 	if len(names) == 0 {
 		names = []string{"vp8", "opus"}
 	}
-	codecs := make([]webrtc.RTPCodecCapability, 0, len(names))
+	var codecs []webrtc.RTPCodecParameters
 	for _, n := range names {
-		codec, err := codecFromName(n)
+		cs, err := codecsFromName(n)
 		if err != nil {
 			log.Printf("Codec %v: %v", n, err)
 			continue
 		}
-		codecs = append(codecs, codec)
+		codecs = append(codecs, cs...)
 	}
 
 	return APIFromCodecs(codecs)
@@ -446,34 +508,6 @@ func deleteUnlocked(g *Group) bool {
 	return true
 }
 
-func Expire() {
-	names := GetNames()
-	now := time.Now()
-
-	for _, name := range names {
-		g := Get(name)
-		if g == nil {
-			continue
-		}
-
-		old := false
-
-		g.mu.Lock()
-		empty := len(g.clients) == 0
-		if empty && !g.description.Public {
-			age := now.Sub(g.timestamp)
-			old = age > maxHistoryAge(g.description)
-		}
-		// We cannot take groups.mu at this point without a deadlock.
-		g.mu.Unlock()
-
-		if empty && old {
-			// Delete will check if the group is still empty
-			Delete(name)
-		}
-	}
-}
-
 func AddClient(group string, c Client) (*Group, error) {
 	g, err := Add(group, nil)
 	if err != nil {
@@ -485,7 +519,7 @@ func AddClient(group string, c Client) (*Group, error) {
 
 	clients := g.getClientsUnlocked(nil)
 
-	if !c.OverridePermissions(g) {
+	if !c.Permissions().System {
 		perms, err := g.description.GetPermission(group, c)
 		if err != nil {
 			return nil, err
@@ -976,7 +1010,30 @@ func GetPublic() []Public {
 	return gs
 }
 
-func ReadPublicGroups() {
+// Update checks that all in-memory groups are up-to-date and updates the
+// list of public groups.  It also removes from memory any non-public
+// groups that haven't been accessed in maxHistoryAge.
+func Update() {
+	names := GetNames()
+
+	for _, name := range names {
+		g := Get(name)
+		if g == nil {
+			continue
+		}
+
+		deleted := false
+		historyAge := maxHistoryAge(g.description)
+		if !g.description.Public && g.EmptyTime() > historyAge {
+			// Delete checks if the group is still empty
+			deleted = Delete(name)
+		}
+
+		if !deleted && descriptionChanged(name, nil) {
+			Add(name, nil)
+		}
+	}
+
 	err := filepath.Walk(
 		Directory,
 		func(path string, fi os.FileInfo, err error) error {
