@@ -308,7 +308,11 @@ func groupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serveFile(w, r, filepath.Join(StaticRoot, "galene.html"))
+	if(name=="atelier"){
+        serveFile(w, r, filepath.Join(StaticRoot, "/edutrainer/edutrainer-galene.html"))
+    }else{
+        serveFile(w, r, filepath.Join(StaticRoot, "galene.html"))
+    }
 }
 
 func publicHandler(w http.ResponseWriter, r *http.Request) {
