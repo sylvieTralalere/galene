@@ -508,8 +508,6 @@ type rtpUpConnection struct {
 	id            string
 	client        group.Client
 	label         string
-	userId        string
-	username      string
 	pc            *webrtc.PeerConnection
 	iceCandidates []*webrtc.ICECandidateInit
 
@@ -548,7 +546,7 @@ func (up *rtpUpConnection) Label() string {
 }
 
 func (up *rtpUpConnection) User() (string, string) {
-	return up.userId, up.username
+	return up.client.Id(), up.client.Username()
 }
 
 func (up *rtpUpConnection) AddLocal(local conn.Down) error {
@@ -1003,7 +1001,7 @@ func sendUpRTCP(up *rtpUpConnection) error {
 	if rate < ^uint64(0) && len(ssrcs) > 0 {
 		packets = append(packets,
 			&rtcp.ReceiverEstimatedMaximumBitrate{
-				Bitrate: rate,
+				Bitrate: float32(rate),
 				SSRCs:   ssrcs,
 			},
 		)
@@ -1185,7 +1183,8 @@ func rtcpDownListener(track *rtpDownTrack) {
 					track.remote.RequestKeyframe()
 				}
 			case *rtcp.ReceiverEstimatedMaximumBitrate:
-				track.maxREMBBitrate.Set(p.Bitrate, jiffies)
+				rate := uint64(p.Bitrate + 0.5)
+				track.maxREMBBitrate.Set(rate, jiffies)
 				adjust = true
 			case *rtcp.ReceiverReport:
 				for _, r := range p.Reports {

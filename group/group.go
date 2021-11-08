@@ -17,11 +17,12 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-var Directory string
+var Directory, DataDirectory string
 var UseMDNS bool
 var UDPMin, UDPMax uint16
 
 var ErrNotAuthorised = errors.New("not authorised")
+var ErrAnonymousNotAuthorised = errors.New("anonymous users not authorised in this group")
 
 type UserError string
 
@@ -38,7 +39,7 @@ type KickError struct {
 func (err KickError) Error() string {
 	m := "kicked out"
 	if err.Message != "" {
-		m += "(" + err.Message + ")"
+		m += " (" + err.Message + ")"
 	}
 	if err.Username != "" {
 		m += " by " + err.Username
@@ -105,28 +106,16 @@ func (g *Group) SetLocked(locked bool, message string) {
 	}
 }
 
-func (g *Group) Public() bool {
+func (g *Group) Description() *Description {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.description.Public
+	return g.description
 }
 
-func (g *Group) Redirect() string {
+func (g *Group) ClientCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.description.Redirect
-}
-
-func (g *Group) AllowRecording() bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.description.AllowRecording
-}
-
-func (g *Group) DisplayName() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.description.DisplayName
+	return len(g.clients)
 }
 
 func (g *Group) EmptyTime() time.Duration {
@@ -373,8 +362,22 @@ func Add(name string, desc *Description) (*Group, error) {
 	return g, err
 }
 
+func validGroupName(name string) bool {
+	if filepath.Separator != '/' &&
+		strings.ContainsRune(name, filepath.Separator) {
+		return false
+	}
+
+	s := path.Clean("/" + name)
+	if s == "/" {
+		return false
+	}
+
+	return s == "/"+name
+}
+
 func add(name string, desc *Description) (*Group, []Client, error) {
-	if name == "" || strings.HasSuffix(name, "/") {
+	if !validGroupName(name) {
 		return nil, nil, UserError("illegal group name")
 	}
 
@@ -481,7 +484,9 @@ func GetSubGroups(parent string) []SubGroup {
 func Get(name string) *Group {
 	groups.mu.Lock()
 	defer groups.mu.Unlock()
-
+	if groups.groups == nil {
+		return nil
+	}
 	return groups.groups[name]
 }
 
@@ -508,7 +513,7 @@ func deleteUnlocked(g *Group) bool {
 	return true
 }
 
-func AddClient(group string, c Client) (*Group, error) {
+func AddClient(group string, c Client, creds ClientCredentials) (*Group, error) {
 	g, err := Add(group, nil)
 	if err != nil {
 		return nil, err
@@ -520,7 +525,7 @@ func AddClient(group string, c Client) (*Group, error) {
 	clients := g.getClientsUnlocked(nil)
 
 	if !c.Permissions().System {
-		perms, err := g.description.GetPermission(group, c)
+		perms, err := g.description.GetPermission(group, creds)
 		if err != nil {
 			return nil, err
 		}
@@ -684,8 +689,12 @@ func kickall(g *Group, message string) {
 	})
 }
 
-func (g *Group) Shutdown(message string) {
-	kickall(g, message)
+func Shutdown(message string) {
+	Range(func(g *Group) bool {
+		g.SetLocked(true, message)
+		kickall(g, message)
+		return true
+	})
 }
 
 type warner interface {
@@ -767,12 +776,16 @@ func (g *Group) GetChatHistory() []ChatHistoryEntry {
 	return h
 }
 
-func matchClient(group string, c Challengeable, users []ClientCredentials) (bool, bool) {
+func matchClient(group string, creds ClientCredentials, users []ClientPattern) (bool, bool) {
 	matched := false
 	for _, u := range users {
-		if u.Username == c.Username() {
+		if u.Username == creds.Username {
 			matched = true
-			if c.Challenge(group, u) {
+			if u.Password == nil {
+				return true, true
+			}
+			m, _ := u.Password.Match(creds.Password)
+			if m {
 				return true, true
 			}
 		}
@@ -783,7 +796,11 @@ func matchClient(group string, c Challengeable, users []ClientCredentials) (bool
 
 	for _, u := range users {
 		if u.Username == "" {
-			if c.Challenge(group, u) {
+			if u.Password == nil {
+				return true, true
+			}
+			m, _ := u.Password.Match(creds.Password)
+			if m {
 				return true, true
 			}
 		}
@@ -791,8 +808,71 @@ func matchClient(group string, c Challengeable, users []ClientCredentials) (bool
 	return false, false
 }
 
-// Type Description represents a group description together with some
-// metadata about the JSON file it was deserialised from.
+// Configuration represents the contents of the data/config.json file.
+type Configuration struct {
+	// The modtime and size of the file.  These are used to detect
+	// when a file has changed on disk.
+	modTime  time.Time `json:"-"`
+	fileSize int64     `json:"-"`
+
+	CanonicalHost string          `json:"canonicalHost"`
+	Admin         []ClientPattern `json:"admin"`
+}
+
+func (conf Configuration) Zero() bool {
+	return conf.modTime.Equal(time.Time{}) &&
+		conf.fileSize == 0
+}
+
+var configuration struct {
+	mu            sync.Mutex
+	configuration *Configuration
+}
+
+func GetConfiguration() (*Configuration, error) {
+	configuration.mu.Lock()
+	defer configuration.mu.Unlock()
+
+	if configuration.configuration == nil {
+		configuration.configuration = &Configuration{}
+	}
+
+	filename := filepath.Join(DataDirectory, "config.json")
+	fi, err := os.Stat(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if !configuration.configuration.Zero() {
+				configuration.configuration = &Configuration{}
+			}
+			return configuration.configuration, nil
+		}
+		return nil, err
+	}
+
+	if configuration.configuration.modTime.Equal(fi.ModTime()) &&
+		configuration.configuration.fileSize == fi.Size() {
+		return configuration.configuration, nil
+	}
+
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	d := json.NewDecoder(f)
+	d.DisallowUnknownFields()
+	var conf Configuration
+	err = d.Decode(&conf)
+	if err != nil {
+		return nil, err
+	}
+	configuration.configuration = &conf
+	return configuration.configuration, nil
+}
+
+// Description represents a group description together with some metadata
+// about the JSON file it was deserialised from.
 type Description struct {
 	// The file this was deserialised from.  This is not necessarily
 	// the name of the group, for example in case of a subgroup.
@@ -844,13 +924,13 @@ type Description struct {
 	Autokick bool `json:"autokick,omitempty"`
 
 	// A list of logins for ops.
-	Op []ClientCredentials `json:"op,omitempty"`
+	Op []ClientPattern `json:"op,omitempty"`
 
 	// A list of logins for presenters.
-	Presenter []ClientCredentials `json:"presenter,omitempty"`
+	Presenter []ClientPattern `json:"presenter,omitempty"`
 
 	// A list of logins for non-presenting users.
-	Other []ClientCredentials `json:"other,omitempty"`
+	Other []ClientPattern `json:"other,omitempty"`
 
 	// Codec preferences.  If empty, a suitable default is chosen in
 	// the APIFromNames function.
@@ -949,12 +1029,12 @@ func GetDescription(name string) (*Description, error) {
 	return &desc, nil
 }
 
-func (desc *Description) GetPermission(group string, c Challengeable) (ClientPermissions, error) {
+func (desc *Description) GetPermission(group string, creds ClientCredentials) (ClientPermissions, error) {
 	var p ClientPermissions
-	if !desc.AllowAnonymous && c.Username() == "" {
-		return p, UserError("anonymous users not allowed in this group, please choose a username")
+	if !desc.AllowAnonymous && creds.Username == "" {
+		return p, ErrAnonymousNotAuthorised
 	}
-	if found, good := matchClient(group, c, desc.Op); found {
+	if found, good := matchClient(group, creds, desc.Op); found {
 		if good {
 			p.Op = true
 			p.Present = true
@@ -965,14 +1045,14 @@ func (desc *Description) GetPermission(group string, c Challengeable) (ClientPer
 		}
 		return p, ErrNotAuthorised
 	}
-	if found, good := matchClient(group, c, desc.Presenter); found {
+	if found, good := matchClient(group, creds, desc.Presenter); found {
 		if good {
 			p.Present = true
 			return p, nil
 		}
 		return p, ErrNotAuthorised
 	}
-	if found, good := matchClient(group, c, desc.Other); found {
+	if found, good := matchClient(group, creds, desc.Other); found {
 		if good {
 			return p, nil
 		}
@@ -981,26 +1061,37 @@ func (desc *Description) GetPermission(group string, c Challengeable) (ClientPer
 	return p, ErrNotAuthorised
 }
 
-type Public struct {
+type Status struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName,omitempty"`
 	Description string `json:"description,omitempty"`
 	Locked      bool   `json:"locked,omitempty"`
-	ClientCount int    `json:"clientCount"`
+	ClientCount *int   `json:"clientCount,omitempty"`
 }
 
-func GetPublic() []Public {
-	gs := make([]Public, 0)
+func GetStatus(g *Group, authentified bool) Status {
+	desc := g.Description()
+	d := Status{
+		Name:        g.name,
+		DisplayName: desc.DisplayName,
+		Description: desc.Description,
+	}
+
+	if authentified || desc.Public {
+		// these are considered private information
+		locked, _ := g.Locked()
+		count := g.ClientCount()
+		d.Locked = locked
+		d.ClientCount = &count
+	}
+	return d
+}
+
+func GetPublic() []Status {
+	gs := make([]Status, 0)
 	Range(func(g *Group) bool {
-		if g.Public() {
-			locked, _ := g.Locked()
-			gs = append(gs, Public{
-				Name:        g.name,
-				DisplayName: g.DisplayName(),
-				Description: g.description.Description,
-				Locked:      locked,
-				ClientCount: len(g.clients),
-			})
+		if g.Description().Public {
+			gs = append(gs, GetStatus(g, false))
 		}
 		return true
 	})
@@ -1014,6 +1105,14 @@ func GetPublic() []Public {
 // list of public groups.  It also removes from memory any non-public
 // groups that haven't been accessed in maxHistoryAge.
 func Update() {
+	_, err := GetConfiguration()
+	if err != nil {
+		log.Printf("%v: %v",
+			filepath.Join(DataDirectory, "config.json"),
+			err,
+		)
+	}
+
 	names := GetNames()
 
 	for _, name := range names {
@@ -1029,12 +1128,12 @@ func Update() {
 			deleted = Delete(name)
 		}
 
-		if !deleted && descriptionChanged(name, nil) {
+		if !deleted && descriptionChanged(name, g.description) {
 			Add(name, nil)
 		}
 	}
 
-	err := filepath.Walk(
+	err = filepath.Walk(
 		Directory,
 		func(path string, fi os.FileInfo, err error) error {
 			if err != nil {
@@ -1054,6 +1153,11 @@ func Update() {
 					"Unexpected extension for group file %v",
 					path,
 				)
+				return nil
+			}
+			base := filepath.Base(filename)
+			if base[0] == '.' {
+				log.Printf("Group file %v ignored", filename)
 				return nil
 			}
 			name := filename[:len(filename)-5]

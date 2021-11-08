@@ -26,18 +26,11 @@ let group;
 /** @type {ServerConnection} */
 let serverConnection;
 
-/**
- * @typedef {Object} userpass
- * @property {string} username
- * @property {string} password
- */
+/** @type {Object} */
+let groupStatus = {};
 
-/* Some browsers disable session storage when cookies are disabled,
-   we fall back to a global variable. */
-/**
- * @type {userpass}
- */
-let fallbackUserPass = null;
+/** @type {string} */
+let username = null;
 
 /**
  * @param {string} username
@@ -332,9 +325,17 @@ function setConnected(connected) {
 
 /** @this {ServerConnection} */
 function gotConnected() {
+    username = getInputElement('username').value.trim();
     setConnected(true);
-    let up = getUserData();
-    this.join(group, up.username, up.password);
+    try {
+        let pw = getInputElement('password').value;
+        getInputElement('password').value = '';
+        this.join(group, username, pw);
+    } catch(e) {
+        console.error(e);
+        displayError(e);
+        serverConnection.close();
+    }
 }
 
 /**
@@ -2376,10 +2377,8 @@ function gotUser(id, kind) {
 }
 
 function displayUsername() {
-    let userpass = getUserData();
+    document.getElementById('userspan').textContent = username;
     let text = '';
-    if(userpass && userpass.username)
-        document.getElementById('userspan').textContent = userpass.username;
     if(serverConnection.permissions.op && serverConnection.permissions.present)
         text = '(op, presenter)';
     else if(serverConnection.permissions.op)
@@ -2410,7 +2409,8 @@ function setTitle(title) {
     }
     if(title)
         set(title);
-    set('Galène');
+    else
+        set('Galène');
 }
 
 
@@ -2464,7 +2464,8 @@ async function gotJoined(kind, group, perms, status, message) {
             pop="op";
         }else{
         }
-
+        groupStatus = status;
+        setTitle((status && status.displayName) || capitalise(group));
         displayUsername();
         setButtonsVisibility();
         loadSteps();
@@ -3596,7 +3597,7 @@ document.getElementById('userform').onsubmit = async function(e) {
         let password = getInputElement('password').value;
         let usercolor = getInputElement('usercolor').value;
         storeUserData(username, password, usercolor);
-        serverConnect();
+        await serverConnect();
     } finally {
         connecting = false;
     }
@@ -3708,13 +3709,25 @@ async function serverConnect() {
     }
 }
 
-function start() {
-    group = decodeURIComponent(location.pathname.replace(/^\/[a-z]*\//, ''));
-    setTitle(capitalise(group));
+async function start() {
+    group = decodeURIComponent(
+        location.pathname.replace(/^\/[a-z]*\//, '').replace(/\/$/, '')
+    );
+    /** @type {Object} */
+    try {
+        let r = await fetch(".status.json")
+        if(!r.ok)
+            throw new Error(`${r.status} ${r.statusText}`);
+        groupStatus = await r.json()
+    } catch(e) {
+        console.error(e);
+        return;
+    }
+
+    setTitle(groupStatus.displayName || capitalise(group));
     addFilters();
     setMediaChoices(false).then(e => reflectSettings());
 
-    fillLogin();
     document.getElementById("login-container").classList.remove('invisible');
     setViewportHeight();
 }
